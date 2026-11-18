@@ -622,10 +622,45 @@
         }
 
         // 사진
+        // [사진 업로드] 버튼으로 고른 사진 올리기
         async function rmUpload(name, pk, event) {
-            const c = rmCur(name);
             const files = Array.from(event.target.files || []);
             event.target.value = '';
+            await rmUploadFiles(name, pk, files);
+        }
+
+        // 사진·파일을 끌어다 놓아 올리기 (해당 칸 위에 놓으면 올라감)
+        function dzIsFileDrag(event) { return !!(event.dataTransfer && Array.from(event.dataTransfer.types || []).indexOf('Files') >= 0); }
+        function rmDragOver(event, el) {
+            if (!dzIsFileDrag(event)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+            el.style.outline = '3px dashed var(--blue-600)'; el.style.outlineOffset = '-3px';
+        }
+        function rmDragLeave(event, el) {
+            if (event.relatedTarget && el.contains(event.relatedTarget)) return;   // 칸 안에서 움직이는 동안은 표시 유지
+            el.style.outline = ''; el.style.outlineOffset = '';
+        }
+        function rmDropPhotos(event, el, name, pk) {
+            if (!dzIsFileDrag(event)) return;
+            event.preventDefault();
+            el.style.outline = ''; el.style.outlineOffset = '';
+            const all = Array.from(event.dataTransfer.files || []);
+            const images = all.filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
+            if (!images.length) { alert('사진 파일만 올릴 수 있습니다.'); return; }
+            if (images.length < all.length) alert('사진이 아닌 파일 ' + (all.length - images.length) + '개는 제외하고 올립니다.');
+            rmUploadFiles(name, pk, images);
+        }
+        // 사진 칸에 붙이는 끌어다 놓기 설정 (수정할 수 없는 상태에서는 붙이지 않음)
+        function rmDropAttrs(name, pk, locked) {
+            return locked ? '' : `ondragover="rmDragOver(event, this)" ondragleave="rmDragLeave(event, this)" ondrop="rmDropPhotos(event, this, '${name}', '${pk}')"`;
+        }
+        // 칸 밖에 잘못 놓았을 때 브라우저가 파일을 열어 프로그램 화면이 사라지는 것을 막음
+        window.addEventListener('dragover', (e) => { if (dzIsFileDrag(e)) e.preventDefault(); });
+        window.addEventListener('drop', (e) => { if (dzIsFileDrag(e)) e.preventDefault(); });
+
+        async function rmUploadFiles(name, pk, files) {
+            const c = rmCur(name);
             if (!files.length || c.fixed) return;
             const M = c.M, siteId = c.siteId, key = c.key;
             M.uploading += files.length;
@@ -666,7 +701,7 @@
             return `<label class="btn ${cls || 'btn-blue'} btn-sm" style="cursor:pointer;">${label}<input type="file" accept="image/*" multiple class="hidden" onchange="rmUpload('${name}', '${pk}', event)"></label>`;
         }
         function rmPhotoGrid(name, pk, photos, locked) {
-            return `<div class="photo-grid">${photos.map((p, idx) => `
+            return `${locked ? '' : '<div style="border:2px dashed var(--slate-300); border-radius:8px; padding:8px; margin:6px 0 8px; text-align:center; font-size:12px; font-weight:700; color:var(--slate-500); background:#fff;">🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)</div>'}<div class="photo-grid">${photos.map((p, idx) => `
                 <div class="photo-card">
                     <img src="${photoUrl(p.path)}">
                     ${locked ? '' : `<div class="photo-actions"><button class="btn btn-red btn-sm" onclick="rmRemovePhoto('${name}', '${pk}', ${idx})">✕ 삭제</button></div>`}
@@ -881,7 +916,7 @@ makeRecordModule({
                 <div><div class="form-label">올해의 안전보건 핵심 목표</div><textarea class="form-textarea" style="min-height:120px;" placeholder="예: • 중대산업재해 ZERO 달성" ${c.dis} onchange="rmSet('${c.name}', 'goals', this.value)">${esc(r.goals)}</textarea></div>
             </div>
         </div>
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${rmDropAttrs(c.name, 'photos', c.locked)}>
             <div class="section-title">
                 <span>📸 경영방침 현장 게시 사진 첨부 및 관리</span>
                 ${rmUploadBtn(c.name, 'photos', '📷 + 게시 사진 업로드', 'btn-blue', c.locked)}
@@ -1572,7 +1607,7 @@ makeRecordModule({
                 ${rmTextarea(c.name, r, 'reply', '현장 조치 결과 및 근로자 회신 내역', c.dis)}
             </div>
         </div>
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${rmDropAttrs(c.name, 'photos', c.locked)}>
             <div class="section-title">
                 <span>📸 건의사항 조치 증빙 사진 (${c.siteLabel})</span>
                 ${rmUploadBtn(c.name, 'photos', '📷 + 조치 사진 업로드', 'btn-blue', c.locked)}
@@ -1630,7 +1665,7 @@ makeRecordModule({
                 ${rmInput(c.name, r, 'hazardType', '핵심 재해 유형 (추락·낙하·감전·협착 등)', c.dis, 'text', '예: 추락')}
             </div>
             <div class="grid-2">
-                <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px;">
+                <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px;" ${rmDropAttrs(c.name, 'beforePhotos', c.locked)}>
                     <div class="section-title">
                         <span style="color:var(--red-700);">🚨 개선 전 (Before) 유해·위험 상태</span>
                         ${rmUploadBtn(c.name, 'beforePhotos', '📷 + 개선 전 사진 추가', 'btn-red', c.locked)}
@@ -1638,7 +1673,7 @@ makeRecordModule({
                     ${rmTextarea(c.name, r, 'beforeDesc', '', c.dis)}
                     ${rmPhotoGrid(c.name, 'beforePhotos', r.beforePhotos, c.locked)}
                 </div>
-                <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:12px;">
+                <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; padding:12px;" ${rmDropAttrs(c.name, 'afterPhotos', c.locked)}>
                     <div class="section-title">
                         <span style="color:var(--emerald-800);">✅ 개선 후 (After) 안전보건 조치 결과</span>
                         ${rmUploadBtn(c.name, 'afterPhotos', '📷 + 개선 후 사진 추가', 'btn-emerald', c.locked)}
@@ -2138,7 +2173,7 @@ makeRecordModule({
             </div>
             ${rmInput(c.name, r, 'evalNote', '현장소장 강평 및 매뉴얼 점검 결과', c.dis)}
         </div>
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${rmDropAttrs(c.name, 'photos', c.locked)}>
             <div class="section-title">
                 <span>📸 비상사태 대비훈련 실시 사진 (${c.siteLabel})</span>
                 ${rmUploadBtn(c.name, 'photos', '📷 + 훈련 사진 업로드', 'btn-blue', c.locked)}
@@ -2375,7 +2410,7 @@ makeRecordModule({
             </table>
         </div>
         ${c.locked ? '' : `<div style="margin-bottom:16px;"><button class="btn btn-emerald btn-sm" onclick="rmRowAdd('${c.name}', 'rows', { cat: '', name: '', plan: 0, exec: 0, note: '' })">+ 예산 항목 추가</button></div>`}
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${rmDropAttrs(c.name, 'photos', c.locked)}>
             <div class="section-title">
                 <span>📸 안전보건 예산 집행 증빙 사진 (세금계산서·반입사진·지급대장 등)</span>
                 ${rmUploadBtn(c.name, 'photos', '📷 + 증빙 사진 업로드', 'btn-blue', c.locked)}
@@ -2419,10 +2454,21 @@ let formsUploading = 0;
 function formsSizeLabel(n) { n = Number(n) || 0; return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
 function formsNormFiles(a) { return (Array.isArray(a) ? a : []).filter(f => f && f.path).map(f => ({ path: f.path, name: f.name || '파일', size: Number(f.size) || 0 })); }
 
+// [파일 올리기] 버튼으로 고른 파일 올리기
 async function formsUpload(event) {
-    const c = rmCur('forms');
     const files = Array.from(event.target.files || []);
     event.target.value = '';
+    await formsUploadFiles(files);
+}
+// 파일을 끌어다 놓아 올리기
+function formsDrop(event, el) {
+    if (!dzIsFileDrag(event)) return;
+    event.preventDefault();
+    el.style.outline = ''; el.style.outlineOffset = '';
+    formsUploadFiles(Array.from(event.dataTransfer.files || []));
+}
+async function formsUploadFiles(files) {
+    const c = rmCur('forms');
     if (!files.length || c.fixed) return;
     const bad = files.filter(f => FORMS_EXT.indexOf((f.name.split('.').pop() || '').toLowerCase()) < 0);
     if (bad.length) return alert('올릴 수 없는 파일 형식입니다: ' + bad.map(f => f.name).join(', ') + '\n\n올릴 수 있는 형식: ' + FORMS_EXT.join(', '));
@@ -2490,12 +2536,13 @@ makeRecordModule({
             </div>
             ${rmTextarea(c.name, r, 'desc', '설명 (언제, 어떻게 쓰는 서식인지)', c.dis, '예: 사고 발생 즉시 현장소장이 작성하여 본사에 제출')}
         </div>
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${c.locked ? '' : 'ondragover="rmDragOver(event, this)" ondragleave="rmDragLeave(event, this)" ondrop="formsDrop(event, this)"'}>
             <div class="section-title">
                 <span>📎 첨부 파일 (${r.files.length}개)</span>
                 ${c.locked ? '' : `<label class="btn btn-blue btn-sm" style="cursor:pointer;">📎 + 파일 올리기<input type="file" multiple class="hidden" accept="${FORMS_EXT.map(e => '.' + e).join(',')}" onchange="formsUpload(event)"></label>`}
             </div>
             ${formsUploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 파일 ${formsUploading}개 올리는 중…</div>` : ''}
+            ${c.locked ? '' : '<div style="border:2px dashed var(--slate-300); border-radius:8px; padding:8px; margin-bottom:8px; text-align:center; font-size:12px; font-weight:700; color:var(--slate-500); background:#fff;">🖱️ 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 개 가능)</div>'}
             ${r.files.length || formsUploading > 0 ? '' : `<div style="font-size:12px; color:var(--slate-500);">아직 올린 파일이 없습니다.${c.locked ? '' : ' PDF, 한글(hwp), 워드, 엑셀, 파워포인트, 압축 파일을 올릴 수 있습니다 (1개 20MB 이하).'}</div>`}
             <div style="display:flex; flex-direction:column; gap:6px;">
                 ${r.files.map((f, idx) => `
