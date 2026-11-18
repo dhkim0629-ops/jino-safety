@@ -167,6 +167,30 @@
         let hqOrg = { companyName: '', ceoName: '', ceoDuty: '', safetyManager: '', advisorFirm: '' };
         let sitesData = [];   // 서버에서 불러온 현장 목록
 
+        // 서버의 현장 한 줄을 화면용 자료로 바꿈.  담당자(staff)는 { role 직책, name 이름, duty 담당업무 } 목록
+        // 예전 방식(안전관리자·공무·반장 세 칸)으로 저장된 현장은 담당자 목록으로 옮겨서 읽음
+        function siteFromRow(row) {
+            const i = row.info || {};
+            let staff;
+            if (Array.isArray(i.staff)) {
+                staff = i.staff.filter(p => p).map(p => ({ role: p.role || '', name: p.name || '', duty: p.duty || '' }));
+            } else {
+                staff = [];
+                if (i.safetyMgr) staff.push({ role: '안전관리자', name: i.safetyMgr, duty: '' });
+                if (i.civilMgr) staff.push({ role: '공무·공사', name: i.civilMgr, duty: '' });
+                if (i.foremen) staff.push({ role: '관리감독자(반장)', name: i.foremen, duty: '' });
+            }
+            return siteApplyStaff({ id: row.id, name: row.name, boss: i.boss || '', phone: i.phone || '', staff: staff });
+        }
+        // 담당자 목록에서 직책별 이름을 뽑아 둠 (8번 반기평가의 평가 대상 표시에 사용)
+        function siteApplyStaff(site) {
+            const pick = (re) => (site.staff || []).filter(p => re.test(p.role) && p.name).map(p => p.name).join(', ');
+            site.safetyMgr = pick(/안전/);
+            site.civilMgr = pick(/공무|공사/);
+            site.foremen = pick(/반장|감독/);
+            return site;
+        }
+
         // ---------- 서버 저장·불러오기 공통 함수 (각 모듈이 사용) ----------
         function setSaveStatus(state, text) {
             const el = document.getElementById('saveStatusPill');
@@ -881,10 +905,24 @@ function renderModule1() { return rmRender('pol'); }
         // ====== [여기에 모듈 2 붙여넣기] ======
 // 관리체계·조직도 (서버 저장판) — 회사 정보와 현장 정보를 서버의 회사·현장 표에 직접 저장
 // 본사·지노 계정만 고칠 수 있고, 현장 계정은 열람·인쇄만.  현장 추가도 이 화면에서 함
+// 현장 정보: 현장소장(필수)·비상연락처 + 담당자 목록(staff).  담당자는 줄을 자유롭게 추가·삭제하고 직책·이름·담당업무를 직접 고침
+const ORG_ROLE_HINTS = ['안전관리자', '보건관리자', '공무', '공사', '관리감독자(반장)', '공종별 반장', '신호수', '화재감시자'];
+let orgDraft = null;      // 화면에서 고치는 중인 내용 (저장 전)
 let orgDirty = false;
 let orgSaving = false;
 function orgCanEdit() { return !isSiteBoss(); }
+function orgBuildDraft() {
+    orgDraft = {
+        org: Object.assign({}, hqOrg),
+        sites: sitesData.map(s => ({ id: s.id, name: s.name, boss: s.boss, phone: s.phone, staff: (s.staff || []).map(p => ({ role: p.role, name: p.name, duty: p.duty })) }))
+    };
+}
 function orgMark() { orgDirty = true; orgRefreshBar(); }
+function orgSetOrg(field, value) { if (!orgCanEdit() || !orgDraft) return; orgDraft.org[field] = value; orgMark(); }
+function orgSetSite(i, field, value) { if (!orgCanEdit() || !orgDraft || !orgDraft.sites[i]) return; orgDraft.sites[i][field] = value; orgMark(); }
+function orgSetStaff(i, j, field, value) { if (!orgCanEdit() || !orgDraft || !orgDraft.sites[i] || !orgDraft.sites[i].staff[j]) return; orgDraft.sites[i].staff[j][field] = value; orgMark(); }
+function orgAddStaff(i) { if (!orgCanEdit() || !orgDraft || !orgDraft.sites[i]) return; orgDraft.sites[i].staff.push({ role: '', name: '', duty: '' }); orgDirty = true; renderActiveModule(); }
+function orgDelStaff(i, j) { if (!orgCanEdit() || !orgDraft || !orgDraft.sites[i]) return; orgDraft.sites[i].staff.splice(j, 1); orgDirty = true; renderActiveModule(); }
 function orgBarInner() {
     const msg = orgDirty
         ? '<span style="color:var(--amber-600); font-weight:800;">● 저장하지 않은 변경이 있습니다</span>'
@@ -895,50 +933,51 @@ function orgRefreshBar() { const bar = document.getElementById('orgSaveBar'); if
 window.addEventListener('beforeunload', (e) => { if (orgDirty) { e.preventDefault(); e.returnValue = ''; } });
 flushHooks.push(() => { if (orgDirty && !orgSaving) saveMod2Org(true); });
 
-// 화면의 입력값을 모아 회사 정보와 현장 정보를 서버에 저장
+// 고친 내용을 회사 정보와 현장 정보로 서버에 저장
 async function saveMod2Org(silent) {
-    if (!orgCanEdit() || orgSaving) return;
-    const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
-    const comp = val('hqComp');
-    if (comp === null) return;                       // 화면이 열려 있지 않으면 저장할 값이 없음
-    if (!comp) { alert('회사명을 입력해 주세요.'); return; }
-    const newOrg = { companyName: comp, ceoName: val('hqCeo'), safetyManager: val('hqSafe'), advisorFirm: val('hqAdvi'), ceoDuty: val('hqDuty') };
-    const newSites = sitesData.map((s, i) => ({
-        id: s.id, name: val(`org_name_${i}`) || s.name, boss: val(`org_boss_${i}`), phone: val(`org_phone_${i}`),
-        safetyMgr: val(`org_safety_${i}`), civilMgr: val(`org_civil_${i}`), foremen: val(`org_foremen_${i}`)
+    if (!orgCanEdit() || orgSaving || !orgDraft) return false;
+    const t = (v) => String(v == null ? '' : v).trim();
+    const org = { companyName: t(orgDraft.org.companyName), ceoName: t(orgDraft.org.ceoName), safetyManager: t(orgDraft.org.safetyManager), advisorFirm: t(orgDraft.org.advisorFirm), ceoDuty: t(orgDraft.org.ceoDuty) };
+    const sites = orgDraft.sites.map(s => ({
+        id: s.id, name: t(s.name), boss: t(s.boss), phone: t(s.phone),
+        staff: s.staff.map(p => ({ role: t(p.role), name: t(p.name), duty: t(p.duty) })).filter(p => p.role || p.name || p.duty)   // 빈 줄은 저장하지 않음
     }));
+    if (!org.companyName) { alert('회사명을 입력해 주세요.'); return false; }
+    for (let i = 0; i < sites.length; i++) {
+        if (!sites[i].name) { alert('현장 #' + (i + 1) + '의 현장명을 입력해 주세요.'); return false; }
+        if (!sites[i].boss) { alert('"' + sites[i].name + '"의 현장소장을 입력해 주세요.\n현장소장은 반드시 있어야 합니다.'); return false; }
+    }
     orgSaving = true;
     setSaveStatus('saving');
     const btn = document.getElementById('orgSaveBtn');
     if (btn) { btn.disabled = true; btn.innerText = '저장 중…'; }
     try {
         const cres = await sb.from('companies').update({
-            name: newOrg.companyName,
-            info: { ceoName: newOrg.ceoName, ceoDuty: newOrg.ceoDuty, safetyManager: newOrg.safetyManager, advisorFirm: newOrg.advisorFirm }
+            name: org.companyName,
+            info: { ceoName: org.ceoName, ceoDuty: org.ceoDuty, safetyManager: org.safetyManager, advisorFirm: org.advisorFirm }
         }).eq('id', currentCompanyId);
         if (cres.error) throw cres.error;
-        for (const s of newSites) {
-            const sres = await sb.from('sites').update({
-                name: s.name, info: { boss: s.boss, phone: s.phone, safetyMgr: s.safetyMgr, civilMgr: s.civilMgr, foremen: s.foremen }
-            }).eq('id', s.id);
+        for (const s of sites) {
+            const sres = await sb.from('sites').update({ name: s.name, info: { boss: s.boss, phone: s.phone, staff: s.staff } }).eq('id', s.id);
             if (sres.error) throw sres.error;
         }
     } catch (err) {
         orgSaving = false;
         srvFail('조직도 저장', err);
         orgRefreshBar();
-        return;
+        return false;
     }
     orgSaving = false;
-    hqOrg = newOrg;
-    newSites.forEach((n, i) => { Object.assign(sitesData[i], n); });
+    hqOrg = org;
+    sites.forEach(n => { const s = sitesData.find(x => x.id === n.id); if (s) siteApplyStaff(Object.assign(s, n)); });
     const comp0 = companiesList.find(c => c.id === currentCompanyId);
-    if (comp0) comp0.name = newOrg.companyName;
+    if (comp0) comp0.name = org.companyName;
     orgDirty = false;
     setSaveStatus('saved');
     document.getElementById('headerCompanyName').innerText = hqOrg.companyName;
     renderGlobalSitePills();
     if (!silent && activeModule === 2) renderActiveModule(); else orgRefreshBar();
+    return true;
 }
 
 // 새 현장 추가 (본사·지노 계정). 현장용 로그인 계정은 노무그룹 지노에서 따로 만들어 연결
@@ -946,32 +985,43 @@ async function orgAddSite() {
     if (!orgCanEdit()) return;
     const name = (prompt('추가할 현장 이름을 입력해 주세요.\n(예: OO동 신축공사)') || '').trim();
     if (!name) return;
-    if (orgDirty) await saveMod2Org(true);
+    if (orgDirty && !(await saveMod2Org(true))) return;   // 고치던 내용을 먼저 저장 (저장이 안 되면 추가하지 않음)
     setSaveStatus('saving');
     const res = await sb.from('sites').insert({ company_id: currentCompanyId, name: name, info: {}, sort_order: sitesData.length + 1 }).select('id').single();
     if (res.error || !res.data) { srvFail('현장 추가', res.error || '응답 없음'); return; }
-    sitesData.push({ id: res.data.id, name: name, boss: '', phone: '', safetyMgr: '', civilMgr: '', foremen: '' });
+    sitesData.push(siteApplyStaff({ id: res.data.id, name: name, boss: '', phone: '', staff: [] }));
     setSaveStatus('saved');
+    orgBuildDraft();
+    orgDirty = true;    // 새 현장은 현장소장을 입력해 저장해야 하므로 '저장 필요' 상태로 둠
     renderGlobalSitePills();
     renderActiveModule();
-    alert('"' + name + '" 현장이 추가되었습니다.\n소장·담당자 정보를 입력한 뒤 [조직도 저장]을 눌러 주세요.\n\n현장용 로그인 계정은 노무그룹 지노에 요청해 주세요.');
+    alert('"' + name + '" 현장이 추가되었습니다.\n현장소장과 담당자를 입력한 뒤 [조직도 저장]을 눌러 주세요.\n\n현장용 로그인 계정은 노무그룹 지노에 요청해 주세요.');
 }
 
 function openMod2Print() {
+    const src = (orgCanEdit() && orgDraft) ? orgDraft : { org: hqOrg, sites: sitesData };   // 화면에 보이는 내용 그대로 인쇄
+    const o = src.org;
     document.getElementById('printModalTitle').innerText = '🖨️ 2. 안전보건 관리체계 및 조직도 (공식 A4)';
     document.getElementById('printSheetContent').innerHTML = `
         <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
-            <h1 style="font-size:20px; font-weight:900;">${esc(hqOrg.companyName)} 안전보건 관리체계 및 현장 조직도</h1>
+            <h1 style="font-size:20px; font-weight:900;">${esc(o.companyName)} 안전보건 관리체계 및 현장 조직도</h1>
         </div>
         <table class="a4-table">
-            <tr><th style="width:20%;">경영책임자</th><td><b>${esc(hqOrg.ceoName)}</b></td><th style="width:20%;">본사 안전총괄</th><td>${esc(hqOrg.safetyManager)}</td></tr>
-            <tr><th>자문 노무법인</th><td>${esc(hqOrg.advisorFirm)}</td><th>핵심 책무</th><td>${esc(hqOrg.ceoDuty)}</td></tr>
+            <tr><th style="width:20%;">경영책임자</th><td><b>${esc(o.ceoName)}</b></td><th style="width:20%;">본사 안전총괄</th><td>${esc(o.safetyManager)}</td></tr>
+            <tr><th>자문 노무법인</th><td>${esc(o.advisorFirm)}</td><th>핵심 책무</th><td>${esc(o.ceoDuty)}</td></tr>
         </table>
         <div style="font-weight:800; font-size:12px; margin:12px 0 6px;">🏗️ 현장별 안전보건 조직 및 담당자 현황</div>
         <table class="a4-table">
-            <thead><tr><th>현장명</th><th>안전보건관리책임자(소장)</th><th>안전관리자(담당·업무)</th><th>공무·공사 담당자</th><th>공종별 반장(관리감독자)</th></tr></thead>
+            <thead><tr><th style="width:24%;">현장명</th><th style="width:22%;">안전보건관리책임자(현장소장)</th><th>담당자 (직책 · 이름 · 담당업무)</th></tr></thead>
             <tbody>
-                ${sitesData.map(s => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.boss)}${s.phone ? `<br><span style="font-size:10px;">(${esc(s.phone)})</span>` : ''}</td><td>${esc(s.safetyMgr)}</td><td>${esc(s.civilMgr)}</td><td>${esc(s.foremen)}</td></tr>`).join('')}
+                ${src.sites.map(s => {
+                    const staff = (s.staff || []).filter(p => p.role || p.name || p.duty);
+                    return `<tr>
+                        <td><b>${esc(s.name)}</b></td>
+                        <td>${esc(s.boss)}${s.phone ? `<br><span style="font-size:10px;">(${esc(s.phone)})</span>` : ''}</td>
+                        <td>${staff.length ? staff.map(p => `<div><b>${esc(p.role) || '담당자'}</b> : ${esc(p.name)}${p.duty ? ` <span style="font-size:10.5px;">(${esc(p.duty)})</span>` : ''}</div>`).join('') : '<span style="color:#64748b;">-</span>'}</td>
+                    </tr>`;
+                }).join('')}
             </tbody>
         </table>
     `;
@@ -981,8 +1031,12 @@ function openMod2Print() {
 function renderModule2() {
     const can = orgCanEdit();
     const dis = can ? '' : 'disabled';
-    const inp = (id, label, value) => `<div><div class="form-label">${label}</div><input type="text" id="${id}" class="form-input" value="${esc(value)}" ${dis} oninput="orgMark()"></div>`;
+    if (!orgDraft || !can || (!orgDirty && !orgSaving)) orgBuildDraft();   // 고치는 중이 아니면 서버에 저장된 내용으로 다시 채움
+    const o = orgDraft.org;
+    const orgInp = (field, label) => `<div><div class="form-label">${label}</div><input type="text" class="form-input" value="${esc(o[field])}" ${dis} oninput="orgSetOrg('${field}', this.value)"></div>`;
+    const siteInp = (i, field, label, value, ph) => `<div><div class="form-label">${label}</div><input type="text" class="form-input" ${ph ? `placeholder="${ph}"` : ''} value="${esc(value)}" ${dis} oninput="orgSetSite(${i}, '${field}', this.value)"></div>`;
     return `
+        <datalist id="orgRoleList">${ORG_ROLE_HINTS.map(r => `<option value="${r}"></option>`).join('')}</datalist>
         <div class="card">
             <div class="section-title">
                 <h2>🏛️ 2. 관리체계 및 본사·현장 조직도 ${can ? '편집 (담당자·업무 직접 수정)' : '(열람)'}</h2>
@@ -995,31 +1049,40 @@ function renderModule2() {
             <div class="section-box" style="border-left:4px solid var(--emerald-600);">
                 <div class="section-title">🏛️ 본사 안전보건 관리체계</div>
                 <div class="grid-2" style="margin-bottom:8px;">
-                    ${inp('hqComp', '회사명', hqOrg.companyName)}
-                    ${inp('hqCeo', '경영책임자 (대표이사)', hqOrg.ceoName)}
+                    ${orgInp('companyName', '회사명')}
+                    ${orgInp('ceoName', '경영책임자 (대표이사)')}
                 </div>
                 <div class="grid-2" style="margin-bottom:8px;">
-                    ${inp('hqSafe', '본사 안전보건총괄 책임자', hqOrg.safetyManager)}
-                    ${inp('hqAdvi', '자문 노무법인', hqOrg.advisorFirm)}
+                    ${orgInp('safetyManager', '본사 안전보건총괄 책임자')}
+                    ${orgInp('advisorFirm', '자문 노무법인')}
                 </div>
-                ${inp('hqDuty', '경영책임자 핵심 책무', hqOrg.ceoDuty)}
+                ${orgInp('ceoDuty', '경영책임자 핵심 책무')}
             </div>
             <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                <div class="section-title">🏗️ 현장별 안전보건 조직도 및 담당자·업무 (${sitesData.length}개 현장)</div>
+                <div class="section-title">🏗️ 현장별 안전보건 조직도 및 담당자·업무 (${orgDraft.sites.length}개 현장)</div>
                 <div style="display:flex; flex-direction:column; gap:14px;">
-                    ${sitesData.map((s, i) => `
+                    ${orgDraft.sites.map((s, i) => `
                         <div style="background:#fff; border:1px solid var(--slate-300); border-radius:10px; padding:14px;">
                             <div style="font-weight:900; color:var(--emerald-800); margin-bottom:10px; border-bottom:1px solid var(--slate-200); padding-bottom:6px;">🏗️ 현장 #${i + 1}. ${esc(s.name)}</div>
-                            <div class="grid-3" style="margin-bottom:8px;">
-                                ${inp(`org_name_${i}`, '현장명', s.name)}
-                                ${inp(`org_boss_${i}`, '현장소장 (책임자)', s.boss)}
-                                ${inp(`org_phone_${i}`, '현장 비상연락처', s.phone)}
+                            <div class="grid-3" style="margin-bottom:12px;">
+                                ${siteInp(i, 'name', '현장명', s.name)}
+                                ${siteInp(i, 'boss', '현장소장 (책임자) <span style="color:var(--red-600);">* 필수</span>', s.boss, '예: 홍길동 소장')}
+                                ${siteInp(i, 'phone', '현장 비상연락처', s.phone, '예: 010-0000-0000')}
                             </div>
-                            <div class="grid-3">
-                                ${inp(`org_safety_${i}`, '안전관리자 (이름·담당업무)', s.safetyMgr)}
-                                ${inp(`org_civil_${i}`, '공무·공사 (이름·담당업무)', s.civilMgr)}
-                                ${inp(`org_foremen_${i}`, '공종별 반장 (이름·담당업무)', s.foremen)}
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
+                                <div class="form-label" style="margin:0;">담당자 (안전관리자·공무·공사·반장 등 — 있는 사람만 등록)</div>
+                                ${can ? `<button class="btn btn-blue btn-sm" onclick="orgAddStaff(${i})">+ 담당자 추가</button>` : ''}
                             </div>
+                            ${s.staff.length ? `
+                                <div style="display:grid; grid-template-columns:minmax(120px, 1fr) minmax(120px, 1fr) minmax(160px, 2fr) ${can ? '58px' : ''}; gap:6px; align-items:center;">
+                                    <div class="form-label" style="margin:0;">직책</div><div class="form-label" style="margin:0;">이름</div><div class="form-label" style="margin:0;">담당업무</div>${can ? '<div></div>' : ''}
+                                    ${s.staff.map((p, j) => `
+                                        <input type="text" class="form-input" list="orgRoleList" placeholder="예: 안전관리자" value="${esc(p.role)}" ${dis} oninput="orgSetStaff(${i}, ${j}, 'role', this.value)">
+                                        <input type="text" class="form-input" placeholder="예: 홍길동 과장" value="${esc(p.name)}" ${dis} oninput="orgSetStaff(${i}, ${j}, 'name', this.value)">
+                                        <input type="text" class="form-input" placeholder="예: 현장 순회점검·안전교육" value="${esc(p.duty)}" ${dis} oninput="orgSetStaff(${i}, ${j}, 'duty', this.value)">
+                                        ${can ? `<button class="btn btn-red btn-sm" onclick="orgDelStaff(${i}, ${j})">삭제</button>` : ''}
+                                    `).join('')}
+                                </div>` : `<div style="font-size:12px; color:var(--slate-500); padding:6px 0;">등록된 담당자가 없습니다.${can ? ' 필요하면 [+ 담당자 추가]로 등록해 주세요.' : ''}</div>`}
                         </div>
                     `).join('')}
                 </div>
@@ -2385,10 +2448,7 @@ function renderModule9() { return rmRender('bud'); }
 
                 const sres = await sb.from('sites').select('id, name, info, sort_order').eq('company_id', currentCompanyId).order('sort_order');
                 if (sres.error) return showLogin('현장 정보를 불러오지 못했습니다: ' + sres.error.message);
-                sitesData = (sres.data || []).map(s => {
-                    const i = s.info || {};
-                    return { id: s.id, name: s.name, boss: i.boss || '', phone: i.phone || '', safetyMgr: i.safetyMgr || '', civilMgr: i.civilMgr || '', foremen: i.foremen || '' };
-                });
+                sitesData = (sres.data || []).map(siteFromRow);
                 if (isSiteBoss()) sitesData = sitesData.filter(s => s.id === appUser.siteId);   // 현장소장은 자기 현장만
                 currentSiteId = isSiteBoss() ? (sitesData[0] ? sitesData[0].id : 'hq') : 'hq';
             } catch (e) {
