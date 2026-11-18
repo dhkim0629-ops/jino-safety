@@ -1364,7 +1364,10 @@ function tbmCompressImage(file) {
     });
 }
 
-// [사진 업로드] 버튼으로 고른 사진 올리기
+// 휴대폰·태블릿처럼 손으로 누르는 기기인가 (이런 기기에서만 [사진 촬영] 버튼을 보여 줌)
+function tbmIsTouchDevice() { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); }
+
+// [사진 업로드]·[사진 촬영] 버튼으로 고르거나 찍은 사진 올리기
 async function handleMod3PhotoUpload(event, siteId) {
     const files = Array.from(event.target.files || []);
     event.target.value = '';
@@ -1578,10 +1581,13 @@ function renderModule3() {
             <div id="tbmDropZone" class="section-box" style="border-left:4px solid var(--purple-600);" ondragover="tbmDragOver(event)" ondragleave="tbmDragLeave(event)" ondrop="tbmDrop(event, '${siteId}')">
                 <div class="section-title">
                     <span>📸 ${tbmDateLabel(tbmSelectedDate)} TBM 현장 실사진 (${tbmEsc(getSiteLabelById(siteId))})</span>
-                    <label class="btn btn-blue btn-sm" style="cursor:pointer;">📷 + 당일 사진 업로드<input type="file" accept="image/*" multiple class="hidden" onchange="handleMod3PhotoUpload(event, '${siteId}')"></label>
+                    <span style="display:flex; gap:6px; flex-wrap:wrap;">
+                        ${tbmIsTouchDevice() ? `<label class="btn btn-emerald btn-sm" style="cursor:pointer;">📸 사진 촬영<input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleMod3PhotoUpload(event, '${siteId}')"></label>` : ''}
+                        <label class="btn btn-blue btn-sm" style="cursor:pointer;">📷 + ${tbmIsTouchDevice() ? '앨범에서 선택' : '당일 사진 업로드'}<input type="file" accept="image/*" multiple class="hidden" onchange="handleMod3PhotoUpload(event, '${siteId}')"></label>
+                    </span>
                 </div>
                 ${tbmUploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 사진 ${tbmUploading}장 올리는 중…</div>` : ''}
-                <div style="border:2px dashed var(--slate-300); border-radius:8px; padding:12px; margin-bottom:10px; text-align:center; font-size:12.5px; font-weight:700; color:var(--slate-500); background:#fff;">🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)${rec.photos.length || tbmUploading > 0 ? '' : '<div style="font-size:11.5px; font-weight:600; margin-top:3px;">아직 올린 사진이 없습니다.</div>'}</div>
+                <div style="border:2px dashed var(--slate-300); border-radius:8px; padding:12px; margin-bottom:10px; text-align:center; font-size:12.5px; font-weight:700; color:var(--slate-500); background:#fff;">${tbmIsTouchDevice() ? '📸 [사진 촬영]으로 바로 찍거나, [앨범에서 선택]으로 찍어 둔 사진을 올립니다' : '🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)'}${rec.photos.length || tbmUploading > 0 ? '' : '<div style="font-size:11.5px; font-weight:600; margin-top:3px;">아직 올린 사진이 없습니다.</div>'}</div>
                 <div class="photo-grid">
                     ${rec.photos.map((p, idx) => `
                         <div class="photo-card">
