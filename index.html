@@ -144,7 +144,7 @@
         const SUPABASE_URL = 'https://vsbddasoslqmcvoppvuj.supabase.co';
         const SUPABASE_KEY = 'sb_publishable__6dfg59E_kmUEO9nkLNA_Q_gxt1jidT';
         const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-        const SERVER_MODULES = [3, 4, 5, 6, 7];   // 서버에 연결된 모듈 번호 (나머지는 이 PC에만 임시 저장)
+        const SERVER_MODULES = [1, 2, 3, 4, 5, 6, 7, 8, 9];   // 서버에 연결된 모듈 번호 (전 모듈 연결됨)
 
         let activeModule = 0;
         let currentSiteId = 'hq';
@@ -167,40 +167,6 @@
         let hqOrg = { companyName: '', ceoName: '', ceoDuty: '', safetyManager: '', advisorFirm: '' };
         let sitesData = [];   // 서버에서 불러온 현장 목록
 
-        // ---------- 서버 미연결 모듈의 임시 저장 (이 PC·이 브라우저에만 남음) ----------
-        function localKey() { return 'JINO_SAFETY_TEMP_' + (currentCompanyId || 'none'); }
-
-        function saveAllDataToLocal() {
-            if (!currentCompanyId) return;
-            try {
-                const payload = {
-                    mod1Data: typeof mod1Data !== 'undefined' ? mod1Data : null,
-                    mod8CeoEvalBySite: typeof mod8CeoEvalBySite !== 'undefined' ? mod8CeoEvalBySite : null,
-                    mod8BossEvalBySite: typeof mod8BossEvalBySite !== 'undefined' ? mod8BossEvalBySite : null,
-                    mod9BudgetRows: typeof mod9BudgetRows !== 'undefined' ? mod9BudgetRows : null,
-                    mod9Photos: typeof mod9Photos !== 'undefined' ? mod9Photos : null
-                };
-                localStorage.setItem(localKey(), JSON.stringify(payload));
-            } catch (e) { console.warn('임시 저장 제한:', e); }
-        }
-
-        function loadAllDataFromLocal() {
-            try {
-                const raw = localStorage.getItem(localKey());
-                if (!raw) return;
-                const data = JSON.parse(raw);
-                if (data.mod1Data && typeof mod1Data !== 'undefined') mod1Data = data.mod1Data;
-                if (data.mod8CeoEvalBySite && typeof mod8CeoEvalBySite !== 'undefined') mod8CeoEvalBySite = data.mod8CeoEvalBySite;
-                if (data.mod8BossEvalBySite && typeof mod8BossEvalBySite !== 'undefined') mod8BossEvalBySite = data.mod8BossEvalBySite;
-                if (data.mod9BudgetRows && typeof mod9BudgetRows !== 'undefined') mod9BudgetRows = data.mod9BudgetRows;
-                if (data.mod9Photos && typeof mod9Photos !== 'undefined') mod9Photos = data.mod9Photos;
-            } catch (e) { console.warn('임시 저장 불러오기 오류:', e); }
-        }
-
-        document.addEventListener('change', () => { setTimeout(saveAllDataToLocal, 50); });
-        document.addEventListener('input', () => { setTimeout(saveAllDataToLocal, 200); });
-        document.addEventListener('click', () => { setTimeout(saveAllDataToLocal, 150); });
-
         // ---------- 서버 저장·불러오기 공통 함수 (각 모듈이 사용) ----------
         function setSaveStatus(state, text) {
             const el = document.getElementById('saveStatusPill');
@@ -222,9 +188,11 @@
         }
 
         // 기록 불러오기: 모듈·현장·기간으로 조회
-        async function srvLoadRecords(module, siteId, fromDate, toDate) {
+        // companyOnly 가 true 이면 현장 구분 없는 회사 공통 기록만 불러옴
+        async function srvLoadRecords(module, siteId, fromDate, toDate, companyOnly) {
             let q = sb.from('records').select('site_id, record_date, item_key, data, updated_at').eq('company_id', currentCompanyId).eq('module', module);
             if (siteId) q = q.eq('site_id', siteId);
+            else if (companyOnly) q = q.is('site_id', null);
             if (fromDate) q = q.gte('record_date', fromDate);
             if (toDate) q = q.lte('record_date', toDate);
             const res = await q.order('record_date');
@@ -303,8 +271,8 @@
         function moduleAllowed(id) { return !(isSiteBoss() && SITE_HIDDEN_MODULES.indexOf(id) >= 0); }
         function buildSiteOptionsHtml(selId) { let h = isSiteBoss() ? '' : `<option value="hq" ${selId === 'hq' ? 'selected' : ''}>🏛️ 본사 통합</option>`; sitesData.forEach(s => { h += `<option value="${s.id}" ${s.id === selId ? 'selected' : ''}>🏗️ ${s.name} (${s.boss})</option>`; }); return h; }
         function closePrintModal() { document.getElementById('printModal').classList.add('hidden'); }
-        function toggleSiteManager() { alert('현장 추가·수정은 다음 단계에서 서버에 연결됩니다.\n지금은 노무그룹 지노에서 현장을 등록합니다.'); }
-        function renderSiteManagerRows() { /* 서버 연결판에서는 사용하지 않음 (모듈 2 연결 시 대체 예정) */ }
+        function toggleSiteManager() { switchModule(2); }   // 현장 추가·수정은 2번 조직도 화면에서 함
+        function renderSiteManagerRows() { /* 서버 연결판에서는 사용하지 않음 */ }
         function addNewSite() { toggleSiteManager(); }
         function selectGlobalSite(id) { currentSiteId = id; renderGlobalSitePills(); renderActiveModule(); }
         function switchModule(id) { if (!moduleAllowed(id)) return; runFlushHooks(); activeModule = id; renderSidebar(); renderActiveModule(); }
@@ -332,7 +300,6 @@
         }
 
         function renderActiveModule() {
-            saveAllDataToLocal();
             const v = document.getElementById('moduleViewContainer');
             if (!appUser) { v.innerHTML = ''; return; }
             if (!sitesData.length) {
@@ -345,7 +312,7 @@
                     <div class="section-title">
                         <h2 style="font-size:18px; font-weight:900;">📊 통합 대시보드 — ${hqOrg.companyName}</h2>
                     </div>
-                    <p style="font-size:12.5px; color:var(--slate-600); margin-bottom:14px;"><b style="color:var(--blue-700);">☁ 서버 저장</b> 표시가 있는 모듈은 입력 즉시 서버에 저장되어 본사와 현장이 같은 내용을 봅니다. 표시가 없는 모듈은 아직 연결 전이라 <b>이 PC의 이 브라우저에만 임시 저장</b>됩니다.</p>
+                    <p style="font-size:12.5px; color:var(--slate-600); margin-bottom:14px;">모든 모듈의 자료는 서버에 저장되어 본사와 현장이 같은 내용을 봅니다. 각 화면의 <b>[저장]</b> 버튼을 누르면 서버에 반영되고, 다른 사람이 입력한 내용은 <b>[🔄 새로고침]</b>으로 확인합니다.</p>
                     <div class="grid-3">
                         ${modulesList.slice(1).filter(m => moduleAllowed(m.id)).map(m => {
                             const ok = typeof window['renderModule' + m.id] === 'function';
@@ -456,10 +423,21 @@
         }
 
         // ---------- 기록 모듈 틀 ----------
-        // makeRecordModule({ id, name, module, mode('list' 건별 | 'half' 반기별), approval, photoKeys, blank, normalize, listCols, formHtml, printHtml, ... })
+        // makeRecordModule({ id, name, module, mode, scope, approval, managerOnly, photoKeys, blank, normalize, listCols, formHtml, printHtml, ... })
+        //   mode  : 'list' 건별 목록 | 'half' 반기별 | 'year' 연도별
+        //   scope : 'site' 현장별(기본) | 'company' 회사 공통
+        //   managerOnly : true 이면 본사·지노만 작성하고 현장 계정은 열람만
         const recMods = {};
+        function rmPeriodic(M) { return M.mode === 'half' || M.mode === 'year'; }
+        function rmPeriodNow(M) { return M.mode === 'year' ? String(new Date().getFullYear()) : halfCurrent(); }
+        function rmPeriodLabel(M, p) { return M.mode === 'year' ? p + '년' : halfLabel(p); }
+        function rmPeriodDate(M, p) { return M.mode === 'year' ? p + '-01-01' : halfDate(p); }
+        function rmPeriodShift(M, p, d) { return M.mode === 'year' ? String(Number(p) + d) : halfShift(p, d); }
+        function rmReadOnly(M) { return !!(M.managerOnly && isSiteBoss()); }
+        function rmScopeLabel(M, siteId) { return M.scope === 'company' ? hqOrg.companyName : getSiteLabelById(siteId); }
         function makeRecordModule(cfg) {
-            const M = Object.assign({ store: {}, sel: {}, half: halfCurrent(), dirty: {}, savedAt: {}, chain: {}, seq: 0, uploading: 0, confirmerDraft: '', photoKeys: [] }, cfg);
+            const M = Object.assign({ store: {}, sel: {}, period: '', dirty: {}, savedAt: {}, chain: {}, seq: 0, uploading: 0, confirmerDraft: '', photoKeys: [], scope: 'site' }, cfg);
+            M.period = rmPeriodNow(M);
             recMods[cfg.name] = M;
             flushHooks.push(() => rmFlush(cfg.name));
             return M;
@@ -468,31 +446,33 @@
             if (Object.keys(recMods).some(n => Object.keys(recMods[n].dirty).length)) { e.preventDefault(); e.returnValue = ''; }
         });
 
-        function rmSiteId() { return currentSiteId === 'hq' ? sitesData[0].id : currentSiteId; }
-        function rmBoxKey(M, siteId, key) { return M.mode === 'half' ? siteId + '|' + key : siteId; }
-        function rmCoords(M, key) { return M.mode === 'half' ? { date: halfDate(key), itemKey: '' } : { date: null, itemKey: key }; }
+        // 회사 공통 모듈은 현장 구분이 없으므로 현장 값을 ''(빈 값)으로 씀 → 서버에는 현장 없음으로 저장
+        function rmSiteId(M) { if (M && M.scope === 'company') return ''; return currentSiteId === 'hq' ? sitesData[0].id : currentSiteId; }
+        function rmBoxKey(M, siteId, key) { return rmPeriodic(M) ? siteId + '|' + key : siteId; }
+        function rmCoords(M, key) { return rmPeriodic(M) ? { date: rmPeriodDate(M, key), itemKey: '' } : { date: null, itemKey: key }; }
         function rmEntryAt(M, siteId, key) { const box = M.store[rmBoxKey(M, siteId, key)]; return (box && box.entries[key]) || null; }
 
         // 현장(반기별 모듈은 현장+반기)의 기록을 서버에서 한 번 불러옴
         function rmBox(M, siteId) {
-            const half = M.half;
+            const half = M.period;
             const bk = rmBoxKey(M, siteId, half);
             if (M.store[bk]) return M.store[bk];
             const box = M.store[bk] = { status: 'loading', entries: {} };
-            const date = M.mode === 'half' ? halfDate(half) : null;
-            const loads = [srvLoadRecords(M.module, siteId, date, date)];
-            if (M.approval) loads.push(srvLoadRecords(M.module + '_ok', siteId, date, date));
+            const date = rmPeriodic(M) ? rmPeriodDate(M, half) : null;
+            const coOnly = M.scope === 'company';
+            const loads = [srvLoadRecords(M.module, siteId, date, date, coOnly)];
+            if (M.approval) loads.push(srvLoadRecords(M.module + '_ok', siteId, date, date, coOnly));
             Promise.all(loads).then(async (res) => {
                 const paths = [];
                 res[0].forEach(r => {
-                    const k = M.mode === 'half' ? half : r.item_key;
+                    const k = rmPeriodic(M) ? half : r.item_key;
                     if (!k) return;
                     const rec = M.normalize(r.data || {});
                     box.entries[k] = { rec: rec, ok: null };
                     M.photoKeys.forEach(pk => rec[pk].forEach(p => paths.push(p.path)));
                 });
                 (res[1] || []).forEach(r => {
-                    const k = M.mode === 'half' ? half : r.item_key;
+                    const k = rmPeriodic(M) ? half : r.item_key;
                     const d = r.data || {};
                     if (box.entries[k]) box.entries[k].ok = { confirmedAt: d.confirmedAt || '', confirmer: d.confirmer || '' };
                 });
@@ -506,11 +486,12 @@
         // 지금 화면에 열려 있는 기록
         function rmCur(name) {
             const M = recMods[name];
-            const siteId = rmSiteId();
+            const siteId = rmSiteId(M);
             const box = rmBox(M, siteId);
-            const key = M.mode === 'half' ? M.half : (M.sel[siteId] || null);
+            const key = rmPeriodic(M) ? M.period : (M.sel[siteId] || null);
             const entry = (box.status === 'ready' && key && box.entries[key]) || null;
-            return { M: M, siteId: siteId, box: box, key: key, entry: entry, sk: key ? siteId + '|' + key : null };
+            // fixed: 본사 확인이 끝났거나, 현장 계정이 열람만 할 수 있는 모듈이면 수정 불가
+            return { M: M, siteId: siteId, box: box, key: key, entry: entry, sk: key ? siteId + '|' + key : null, fixed: !entry || !!entry.ok || rmReadOnly(M) };
         }
 
         function rmSave(name, siteId, key) {
@@ -542,8 +523,12 @@
         }
         function rmMark(name) { const c = rmCur(name); if (!c.sk) return; c.M.dirty[c.sk] = ++c.M.seq; rmRefreshBar(name); }
         // 입력 내용은 화면에만 반영해 두고, [저장] 버튼을 누르면 서버에 저장
-        function rmSet(name, field, value) { const c = rmCur(name); if (!c.entry || c.entry.ok) return; c.entry.rec[field] = value; rmMark(name); }
-        function rmSetIdx(name, field, idx, value) { const c = rmCur(name); if (!c.entry || c.entry.ok) return; c.entry.rec[field][idx] = value; rmMark(name); }
+        function rmSet(name, field, value) { const c = rmCur(name); if (c.fixed) return; c.entry.rec[field] = value; rmMark(name); }
+        function rmSetIdx(name, field, idx, value, rerender) { const c = rmCur(name); if (c.fixed) return; c.entry.rec[field][idx] = value; rmMark(name); if (rerender) renderActiveModule(); }
+        // 표 형태 자료(예: 예산 항목)의 한 칸 고치기 · 줄 추가 · 줄 삭제
+        function rmRowSet(name, field, idx, sub, value, rerender) { const c = rmCur(name); if (c.fixed || !c.entry.rec[field][idx]) return; c.entry.rec[field][idx][sub] = value; rmMark(name); if (rerender) renderActiveModule(); }
+        function rmRowAdd(name, field, obj) { const c = rmCur(name); if (c.fixed) return; c.entry.rec[field].push(obj); rmMark(name); renderActiveModule(); }
+        function rmRowDel(name, field, idx) { const c = rmCur(name); if (c.fixed || c.entry.rec[field].length <= 1) return; c.entry.rec[field].splice(idx, 1); rmMark(name); renderActiveModule(); }
         async function rmSaveNow(name) {
             const c = rmCur(name);
             if (!c.entry) return;
@@ -571,8 +556,8 @@
 
         function rmCreate(name) {
             const c = rmCur(name);
-            if (c.box.status !== 'ready') return;
-            const key = c.M.mode === 'half' ? c.M.half : srvRandomId();
+            if (c.box.status !== 'ready' || rmReadOnly(c.M)) return;
+            const key = rmPeriodic(c.M) ? c.M.period : srvRandomId();
             if (c.box.entries[key]) return;
             c.box.entries[key] = { rec: c.M.normalize(c.M.blank(c.siteId)), ok: null };
             if (c.M.mode === 'list') c.M.sel[c.siteId] = key;
@@ -581,7 +566,7 @@
         }
         function rmDelete(name) {
             const c = rmCur(name);
-            if (!c.entry) return;
+            if (!c.entry || rmReadOnly(c.M)) return;
             if (c.entry.ok) return alert('본사 확인이 끝난 자료입니다. 확인을 취소한 뒤 삭제해 주세요.');
             if (!confirm('이 ' + (c.M.itemLabel || '기록') + '을(를) 삭제하시겠습니까?\n삭제하면 본사와 현장 모두에서 사라집니다.')) return;
             const M = c.M, siteId = c.siteId, key = c.key, sk = c.sk;
@@ -597,15 +582,15 @@
             });
             renderActiveModule();
         }
-        function rmSelect(name, key) { const M = recMods[name]; M.sel[rmSiteId()] = key; renderActiveModule(); }
-        function rmBack(name) { const M = recMods[name]; M.sel[rmSiteId()] = null; renderActiveModule(); }
-        function rmMoveHalf(name, delta) { const M = recMods[name]; M.half = halfShift(M.half, delta); renderActiveModule(); }
-        function rmThisHalf(name) { recMods[name].half = halfCurrent(); renderActiveModule(); }
+        function rmSelect(name, key) { const M = recMods[name]; M.sel[rmSiteId(M)] = key; renderActiveModule(); }
+        function rmBack(name) { const M = recMods[name]; M.sel[rmSiteId(M)] = null; renderActiveModule(); }
+        function rmMoveHalf(name, delta) { const M = recMods[name]; M.period = rmPeriodShift(M, M.period, delta); renderActiveModule(); }
+        function rmThisHalf(name) { const M = recMods[name]; M.period = rmPeriodNow(M); renderActiveModule(); }
         // 서버에서 다시 불러오기 (다른 사람이 입력한 내용 확인용). 저장하지 않은 내용은 먼저 저장
         function rmReload(name) {
             const M = recMods[name];
-            const siteId = rmSiteId();
-            const bk = rmBoxKey(M, siteId, M.half);
+            const siteId = rmSiteId(M);
+            const bk = rmBoxKey(M, siteId, M.period);
             const pending = Object.keys(M.dirty).map(sk => { const i = sk.indexOf('|'); return rmSave(name, sk.slice(0, i), sk.slice(i + 1)); });
             Promise.all(pending).then(() => { delete M.store[bk]; renderActiveModule(); });
         }
@@ -615,7 +600,7 @@
             const c = rmCur(name);
             const files = Array.from(event.target.files || []);
             event.target.value = '';
-            if (!files.length || !c.entry || c.entry.ok) return;
+            if (!files.length || c.fixed) return;
             const M = c.M, siteId = c.siteId, key = c.key;
             M.uploading += files.length;
             renderActiveModule();
@@ -638,7 +623,7 @@
         }
         function rmRemovePhoto(name, pk, idx) {
             const c = rmCur(name);
-            if (!c.entry || c.entry.ok || !c.entry.rec[pk][idx]) return;
+            if (c.fixed || !c.entry.rec[pk][idx]) return;
             const path = c.entry.rec[pk][idx].path;
             c.entry.rec[pk].splice(idx, 1);
             rmSave(name, c.siteId, c.key).then(() => srvRemovePhotos([path]));
@@ -646,7 +631,7 @@
         }
         function rmCaption(name, pk, idx, value) {
             const c = rmCur(name);
-            if (!c.entry || c.entry.ok || !c.entry.rec[pk][idx]) return;
+            if (c.fixed || !c.entry.rec[pk][idx]) return;
             c.entry.rec[pk][idx].caption = value;
             rmSave(name, c.siteId, c.key);
         }
@@ -719,7 +704,7 @@
                         ${mgr ? `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${sealPanelHtml()}<button class="btn btn-outline btn-sm" style="color:var(--red-700);" onclick="rmCancelConfirm('${name}')">확인 취소</button></div>` : ''}
                     </div>`;
             }
-            if (!mgr) return `<div style="background:var(--amber-50); border:1px solid var(--amber-500); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">⏳ 본사 확인 전입니다. 작성을 마치고 [저장]을 누르면 본사에서 확인합니다.</div>`;
+            if (!mgr) return `<div style="background:var(--amber-50); border:1px solid var(--amber-500); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">⏳ 본사 확인 전입니다.${rmReadOnly(M) ? '' : ' 작성을 마치고 [저장]을 누르면 본사에서 확인합니다.'}</div>`;
             return `
                 <div class="section-box" style="border-left:4px solid var(--purple-600); padding:12px;">
                     <div class="section-title" style="margin-bottom:8px;">🏛️ 본사 최종 확인</div>
@@ -737,8 +722,9 @@
             if (!c.entry) return alert('인쇄할 ' + (c.M.itemLabel || '기록') + '이(가) 없습니다.');
             document.getElementById('printModalTitle').innerText = c.M.printTitle;
             document.getElementById('printSheetContent').innerHTML = c.M.printHtml(c.entry.rec, {
-                siteLabel: esc(getSiteLabelById(c.siteId)),
-                halfLabel: c.M.mode === 'half' ? halfLabel(c.M.half) : '',
+                siteLabel: esc(rmScopeLabel(c.M, c.siteId)),
+                siteObj: sitesData.find(s => s.id === c.siteId) || {},
+                halfLabel: rmPeriodic(c.M) ? rmPeriodLabel(c.M, c.M.period) : '',
                 approvalRow: c.M.approval ? approvalPrintRow(c.entry.ok) : ''
             });
             document.getElementById('printModal').classList.remove('hidden');
@@ -747,26 +733,41 @@
         // 모듈 화면
         function rmRender(name) {
             const M = recMods[name];
-            const siteId = rmSiteId();
+            const siteId = rmSiteId(M);
             const box = rmBox(M, siteId);
             if (M.approval) sealEnsure();
-            let key = M.mode === 'half' ? M.half : (M.sel[siteId] || null);
-            if (M.mode === 'list' && key && box.status === 'ready' && !box.entries[key]) { key = null; M.sel[siteId] = null; }
+            const periodic = rmPeriodic(M);
+            const ro = rmReadOnly(M);
+            let key = periodic ? M.period : (M.sel[siteId] || null);
+            if (!periodic && key && box.status === 'ready' && !box.entries[key]) { key = null; M.sel[siteId] = null; }
             const sk = key ? siteId + '|' + key : null;
-            rmFlush(name, sk);   // 다른 건·현장·반기에서 저장하지 않고 넘어온 내용은 자동 저장
+            rmFlush(name, sk);   // 다른 건·현장·기간에서 저장하지 않고 넘어온 내용은 자동 저장
             const entry = (box.status === 'ready' && key && box.entries[key]) || null;
-            const locked = !!(entry && entry.ok);
+            const locked = !!(entry && entry.ok) || ro;
             const dis = locked ? 'disabled' : '';
-            const halfNav = M.mode !== 'half' ? '' : `
-                <div><div class="form-label">${M.halfTitle || '대상 반기'}</div>
+            const unit = M.mode === 'year' ? '연도' : '반기';
+            const scopeLabel = esc(rmScopeLabel(M, siteId));
+            const periodNav = !periodic ? '' : `
+                <div><div class="form-label">${M.halfTitle || ('대상 ' + unit)}</div>
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn btn-outline btn-sm" onclick="rmMoveHalf('${name}', -1)">◀ 이전 반기</button>
-                        <span style="font-size:14.5px; font-weight:900; min-width:150px; text-align:center;">${halfLabel(M.half)}</span>
-                        <button class="btn btn-outline btn-sm" onclick="rmMoveHalf('${name}', 1)">다음 반기 ▶</button>
-                        ${M.half === halfCurrent() ? '' : `<button class="btn btn-blue btn-sm" onclick="rmThisHalf('${name}')">이번 반기</button>`}
+                        <button class="btn btn-outline btn-sm" onclick="rmMoveHalf('${name}', -1)">◀ 이전 ${unit}</button>
+                        <span style="font-size:14.5px; font-weight:900; min-width:${M.mode === 'year' ? 70 : 150}px; text-align:center;">${rmPeriodLabel(M, M.period)}</span>
+                        <button class="btn btn-outline btn-sm" onclick="rmMoveHalf('${name}', 1)">다음 ${unit} ▶</button>
+                        ${M.period === rmPeriodNow(M) ? '' : `<button class="btn btn-blue btn-sm" onclick="rmThisHalf('${name}')">${M.mode === 'year' ? '올해' : '이번 반기'}</button>`}
                         <button class="btn btn-outline btn-sm" onclick="rmReload('${name}')">🔄 새로고침</button>
                     </div>
                 </div>`;
+            const listNav = `<div style="display:flex; align-items:flex-end; gap:6px; flex-wrap:wrap;">
+                    ${key ? `<button class="btn btn-outline" onclick="rmBack('${name}')">← 목록으로</button>` : (ro ? '' : `<button class="btn btn-emerald" onclick="rmCreate('${name}')">${M.newLabel || '+ 새로 작성'}</button>`)}
+                    <button class="btn btn-outline btn-sm" onclick="rmReload('${name}')">🔄 새로고침</button>
+                </div>`;
+            const scopeBox = M.scope === 'company'
+                ? `<div><div class="form-label">적용 범위 (회사 공통${periodic ? '·' + unit + '별' : ''} 서버 저장)</div><input type="text" class="form-input" value="${scopeLabel}" readonly style="font-weight:800; background:#f8fafc;"></div>`
+                : `<div><div class="form-label">현장 선택 (현장별·${periodic ? unit + '별' : '건별'} 서버 저장)</div>
+                        <select class="form-select" onchange="selectGlobalSite(this.value)">
+                            ${sitesData.map(s => `<option value="${s.id}" ${s.id === siteId ? 'selected' : ''}>🏗️ ${esc(s.name)} (${esc(s.boss)})</option>`).join('')}
+                        </select>
+                    </div>`;
             const head = `
                 <div class="card">
                     <div class="section-title">
@@ -775,15 +776,8 @@
                     </div>
                     <div class="section-box" style="border-left:4px solid var(--emerald-600); padding:12px;">
                         <div class="grid-2">
-                            <div><div class="form-label">현장 선택 (${M.mode === 'half' ? '현장별·반기별' : '현장별·건별'} 서버 저장)</div>
-                                <select class="form-select" onchange="selectGlobalSite(this.value)">
-                                    ${sitesData.map(s => `<option value="${s.id}" ${s.id === siteId ? 'selected' : ''}>🏗️ ${esc(s.name)} (${esc(s.boss)})</option>`).join('')}
-                                </select>
-                            </div>
-                            ${M.mode === 'half' ? halfNav : `<div style="display:flex; align-items:flex-end; gap:6px; flex-wrap:wrap;">
-                                ${key ? `<button class="btn btn-outline" onclick="rmBack('${name}')">← 목록으로</button>` : `<button class="btn btn-emerald" onclick="rmCreate('${name}')">${M.newLabel || '+ 새로 작성'}</button>`}
-                                <button class="btn btn-outline btn-sm" onclick="rmReload('${name}')">🔄 새로고침</button>
-                            </div>`}
+                            ${scopeBox}
+                            ${periodic ? periodNav : listNav}
                         </div>
                     </div>`;
             if (box.status !== 'ready') {
@@ -795,17 +789,16 @@
                     </div>
                 </div>`;
             }
+            const emptyBox = (text) => `
+                    <div class="section-box" style="text-align:center; padding:28px 16px; border:2px dashed var(--slate-300); background:#fff;">
+                        <div style="font-size:13px; font-weight:700; color:var(--slate-600); margin-bottom:12px;">${text}</div>
+                        ${ro ? '<div style="font-size:12px; color:var(--slate-500);">이 자료는 본사에서 작성합니다.</div>' : `<button class="btn btn-emerald" onclick="rmCreate('${name}')">${M.newLabel || '+ 작성'}</button>`}
+                    </div>
+                </div>`;
             // 건별 모듈: 목록 화면
-            if (M.mode === 'list' && !entry) {
+            if (!periodic && !entry) {
                 const keys = Object.keys(box.entries).sort((a, b) => String(box.entries[b].rec.date || '').localeCompare(String(box.entries[a].rec.date || '')));
-                if (!keys.length) {
-                    return head + `
-                        <div class="section-box" style="text-align:center; padding:28px 16px; border:2px dashed var(--slate-300); background:#fff;">
-                            <div style="font-size:13px; font-weight:700; color:var(--slate-600); margin-bottom:12px;">${esc(getSiteLabelById(siteId))}에 등록된 ${M.itemLabel || '기록'}이(가) 없습니다.</div>
-                            <button class="btn btn-emerald" onclick="rmCreate('${name}')">${M.newLabel || '+ 새로 작성'}</button>
-                        </div>
-                    </div>`;
-                }
+                if (!keys.length) return head + emptyBox(`${scopeLabel}에 등록된 ${M.itemLabel || '기록'}이(가) 없습니다.`);
                 return head + `
                     <div style="font-size:12px; font-weight:800; color:var(--slate-600); margin-bottom:6px;">총 ${keys.length}건 · 줄을 누르면 내용을 열어 보거나 고칠 수 있습니다.</div>
                     <div class="law-table-wrap">
@@ -829,138 +822,156 @@
                     </div>
                 </div>`;
             }
-            // 반기별 모듈: 미작성 화면
-            if (!entry) {
-                return head + `
-                    <div class="section-box" style="text-align:center; padding:28px 16px; border:2px dashed var(--slate-300); background:#fff;">
-                        <div style="font-size:13px; font-weight:700; color:var(--slate-600); margin-bottom:12px;">${esc(getSiteLabelById(siteId))} · ${halfLabel(M.half)} ${M.itemLabel || '기록'}이(가) 아직 없습니다.</div>
-                        <button class="btn btn-emerald" onclick="rmCreate('${name}')">${M.newLabel || '+ 작성'}</button>
-                    </div>
-                </div>`;
-            }
+            // 반기별·연도별 모듈: 미작성 화면
+            if (!entry) return head + emptyBox(`${scopeLabel} · ${rmPeriodLabel(M, M.period)} ${M.itemLabel || '기록'}이(가) 아직 없습니다.`);
             // 작성·수정 화면
+            const editable = !locked;
             return head + `
                     ${M.approval ? rmApprovalBox(name, M, entry) : ''}
-                    ${M.formHtml(entry.rec, { name: name, dis: dis, locked: locked, siteId: siteId, siteLabel: esc(getSiteLabelById(siteId)), uploading: M.uploading })}
-                    ${locked ? '' : `<div style="text-align:right; margin-bottom:10px;"><button class="btn btn-outline btn-sm" style="color:var(--red-700);" onclick="rmDelete('${name}')">🗑️ 이 ${M.itemLabel || '기록'} 삭제</button></div>
-                    <div id="${name}SaveBar" style="position:sticky; bottom:0; z-index:5; background:#fff; border:2px solid var(--emerald-600); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; box-shadow:0 -2px 10px rgba(0,0,0,0.08);">${rmBarInner(M, sk)}</div>`}
+                    ${ro && !M.approval ? '<div style="background:var(--slate-100); border:1px solid var(--slate-300); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">👁️ 본사에서 작성한 자료입니다. 현장 계정은 열람과 인쇄만 할 수 있습니다.</div>' : ''}
+                    ${M.formHtml(entry.rec, { name: name, dis: dis, locked: locked, siteId: siteId, siteLabel: scopeLabel, siteObj: sitesData.find(s => s.id === siteId) || {}, uploading: M.uploading })}
+                    ${editable ? `<div style="text-align:right; margin-bottom:10px;"><button class="btn btn-outline btn-sm" style="color:var(--red-700);" onclick="rmDelete('${name}')">🗑️ 이 ${M.itemLabel || '기록'} 삭제</button></div>
+                    <div id="${name}SaveBar" style="position:sticky; bottom:0; z-index:5; background:#fff; border:2px solid var(--emerald-600); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; box-shadow:0 -2px 10px rgba(0,0,0,0.08);">${rmBarInner(M, sk)}</div>` : ''}
                 </div>`;
         }
         // ====== [여기에 모듈 1 붙여넣기] ======
-let mod1Data = {
-    policyText: '1. 당사는 근로자의 생명과 안전을 경영의 최우선 가치로 삼는다.\n2. 전 현장은 작업 전 위험성평가 및 일일 TBM을 철저히 이행하여 추락·낙하·부딪힘 등 핵심 위험요인을 사전 제거한다.\n3. 종사자의 안전보건 의견청취(QR)와 작업중지권을 완벽히 보장한다.',
-    goals: '• 중대산업재해 ZERO 달성\n• 일일 TBM 및 위험성평가 이행률 100%\n• 근로자 안전건의(QR) 조치 회신율 100%',
-    place: '현장 안전교육장 및 근로자 휴게실 게시판',
-    date: '2026-11-16',
-    photos: [
-        { url: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="#ecfdf5"/><text x="240" y="160" fill="#047857" font-size="16" font-weight="bold" text-anchor="middle">현장 안전보건 경영방침 게시 증빙</text></svg>'), caption: '현장 안전교육장 경영방침 게시 사진' }
-    ]
-};
-
-function handleMod1PhotoUpload(event) {
-    Array.from(event.target.files || []).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            mod1Data.photos.push({ url: e.target.result, caption: file.name.replace(/\.[^/.]+$/, '') });
-            renderActiveModule();
-        };
-        reader.readAsDataURL(file);
-    });
-}
-
-function openMod1Print() {
-    document.getElementById('printModalTitle').innerText = '🖨️ 1. 안전보건 경영방침 및 목표 (공식 A4)';
-    document.getElementById('printSheetContent').innerHTML = `
+// 안전보건 경영방침·목표 (서버 저장판) — 회사 공통·연도별.  본사가 작성하고 현장 계정은 열람·인쇄만
+// 서버 기록 한 건 = 회사·연도 하나.  data = { date(게시일), place(게시 장소), policyText, goals, photos }
+makeRecordModule({
+    id: 1, name: 'pol', module: 'policy', mode: 'year', scope: 'company', approval: false, managerOnly: true, photoKeys: ['photos'],
+    title: '🎯 1. 안전보건 경영방침 및 목표 (현장 게시 사진 첨부)',
+    itemLabel: '경영방침', newLabel: '+ 이 연도 경영방침 작성', saveLabel: '경영방침 저장', halfTitle: '적용 연도',
+    printTitle: '🖨️ 1. 안전보건 경영방침 및 목표 (공식 A4)',
+    blank: () => ({ date: todayStr(), place: '', policyText: '', goals: '', photos: [] }),
+    normalize: (d) => ({ date: d.date || '', place: d.place || '', policyText: d.policyText || '', goals: d.goals || '', photos: normPhotos(d.photos) }),
+    formHtml: (r, c) => `
+        <div class="section-box" style="border-left:4px solid var(--emerald-600);">
+            <div class="grid-2" style="margin-bottom:10px;">
+                ${rmInput(c.name, r, 'place', '게시 장소', c.dis, 'text', '예: 현장 안전교육장 및 근로자 휴게실 게시판')}
+                ${rmInput(c.name, r, 'date', '게시 일자', c.dis, 'date')}
+            </div>
+            <div class="grid-2">
+                <div><div class="form-label">안전보건 경영방침 선언문</div><textarea class="form-textarea" style="min-height:120px;" placeholder="예: 1. 당사는 근로자의 생명과 안전을 경영의 최우선 가치로 삼는다." ${c.dis} onchange="rmSet('${c.name}', 'policyText', this.value)">${esc(r.policyText)}</textarea></div>
+                <div><div class="form-label">올해의 안전보건 핵심 목표</div><textarea class="form-textarea" style="min-height:120px;" placeholder="예: • 중대산업재해 ZERO 달성" ${c.dis} onchange="rmSet('${c.name}', 'goals', this.value)">${esc(r.goals)}</textarea></div>
+            </div>
+        </div>
+        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+            <div class="section-title">
+                <span>📸 경영방침 현장 게시 사진 첨부 및 관리</span>
+                ${rmUploadBtn(c.name, 'photos', '📷 + 게시 사진 업로드', 'btn-blue', c.locked)}
+            </div>
+            ${c.uploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 사진 ${c.uploading}장 올리는 중…</div>` : ''}
+            ${r.photos.length || c.uploading > 0 ? '' : '<div style="font-size:12px; color:var(--slate-500);">아직 올린 사진이 없습니다.</div>'}
+            ${rmPhotoGrid(c.name, 'photos', r.photos, c.locked)}
+        </div>`,
+    printHtml: (r, p) => `
         <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
             <h1 style="font-size:20px; font-weight:900;">안전보건 경영방침 및 현장 게시 확인서</h1>
         </div>
         <table class="a4-table">
-            <tr><th style="width:20%;">적용 소속</th><td><b>${getSiteLabelById(currentSiteId)}</b></td><th style="width:20%;">게시 일자</th><td>${mod1Data.date}</td></tr>
-            <tr><th>게시 장소</th><td colspan="3">${mod1Data.place}</td></tr>
-            <tr><th>안전보건 경영방침</th><td colspan="3" style="white-space:pre-line; line-height:1.6;">${mod1Data.policyText}</td></tr>
-            <tr><th>안전보건 목표</th><td colspan="3" style="white-space:pre-line; line-height:1.6;">${mod1Data.goals}</td></tr>
+            <tr><th style="width:20%;">적용 소속 / 연도</th><td><b>${p.siteLabel}</b> · ${p.halfLabel}</td><th style="width:20%;">게시 일자</th><td>${esc(r.date)}</td></tr>
+            <tr><th>게시 장소</th><td colspan="3">${esc(r.place)}</td></tr>
+            <tr><th>안전보건 경영방침</th><td colspan="3" style="white-space:pre-line; line-height:1.6;">${esc(r.policyText)}</td></tr>
+            <tr><th>안전보건 목표</th><td colspan="3" style="white-space:pre-line; line-height:1.6;">${esc(r.goals)}</td></tr>
         </table>
         <div style="font-weight:800; font-size:12px; margin:10px 0 6px;">📸 현장 게시 사진 증빙</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            ${mod1Data.photos.map(p => `<div style="border:1px solid #334155; padding:6px; text-align:center;"><img src="${p.url}" style="max-height:160px; max-width:100%; object-fit:cover;"><div style="font-size:11px; margin-top:4px; font-weight:700;">${p.caption}</div></div>`).join('')}
-        </div>
-    `;
-    document.getElementById('printModal').classList.remove('hidden');
-}
-
-function renderModule1() {
-    return `
-        <div class="card">
-            <div class="section-title">
-                <h2>🎯 1. 안전보건 경영방침 및 목표 (현장 게시 사진 첨부)</h2>
-                <button class="btn btn-amber" onclick="openMod1Print()">🖨️ A4 프린트</button>
-            </div>
-            <div class="section-box" style="border-left:4px solid var(--emerald-600);">
-                <div class="grid-3" style="margin-bottom:10px;">
-                    <div><div class="form-label">게시 현장</div><select class="form-select" onchange="selectGlobalSite(this.value)">${buildSiteOptionsHtml(currentSiteId)}</select></div>
-                    <div><div class="form-label">게시 장소</div><input type="text" class="form-input" value="${mod1Data.place}" onchange="mod1Data.place=this.value"></div>
-                    <div><div class="form-label">게시 일자</div><input type="date" class="form-input" value="${mod1Data.date}" onchange="mod1Data.date=this.value"></div>
-                </div>
-                <div class="grid-2">
-                    <div><div class="form-label">안전보건 경영방침 선언문</div><textarea class="form-textarea" style="min-height:95px;" onchange="mod1Data.policyText=this.value">${mod1Data.policyText}</textarea></div>
-                    <div><div class="form-label">올해의 안전보건 핵심 목표</div><textarea class="form-textarea" style="min-height:95px;" onchange="mod1Data.goals=this.value">${mod1Data.goals}</textarea></div>
-                </div>
-            </div>
-            <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                <div class="section-title">
-                    <span>📸 경영방침 현장 게시 사진 첨부 및 관리</span>
-                    <label class="btn btn-blue btn-sm" style="cursor:pointer;">📷 + 게시 사진 업로드<input type="file" accept="image/*" multiple class="hidden" onchange="handleMod1PhotoUpload(event)"></label>
-                </div>
-                <div class="photo-grid">
-                    ${mod1Data.photos.map((p, idx) => `
-                        <div class="photo-card">
-                            <img src="${p.url}">
-                            <div class="photo-actions"><button class="btn btn-red btn-sm" onclick="mod1Data.photos.splice(${idx},1); renderActiveModule();">✕ 삭제</button></div>
-                            <input type="text" class="photo-caption-input" value="${p.caption}" onchange="mod1Data.photos[${idx}].caption=this.value">
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        </div>
-    `;
-}
-
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">${rmPrintPhotos(r.photos)}</div>`
+});
+function renderModule1() { return rmRender('pol'); }
         // ====== [여기에 모듈 2 붙여넣기] ======
-function saveMod2Org() {
-    hqOrg.companyName = document.getElementById('hqComp').value;
-    hqOrg.ceoName = document.getElementById('hqCeo').value;
-    hqOrg.safetyManager = document.getElementById('hqSafe').value;
-    hqOrg.advisorFirm = document.getElementById('hqAdvi').value;
-    hqOrg.ceoDuty = document.getElementById('hqDuty').value;
-    sitesData.forEach((s, i) => {
-        s.name = document.getElementById(`org_name_${i}`).value;
-        s.boss = document.getElementById(`org_boss_${i}`).value;
-        s.phone = document.getElementById(`org_phone_${i}`).value;
-        s.safetyMgr = document.getElementById(`org_safety_${i}`).value;
-        s.civilMgr = document.getElementById(`org_civil_${i}`).value;
-        s.foremen = document.getElementById(`org_foremen_${i}`).value;
-    });
+// 관리체계·조직도 (서버 저장판) — 회사 정보와 현장 정보를 서버의 회사·현장 표에 직접 저장
+// 본사·지노 계정만 고칠 수 있고, 현장 계정은 열람·인쇄만.  현장 추가도 이 화면에서 함
+let orgDirty = false;
+let orgSaving = false;
+function orgCanEdit() { return !isSiteBoss(); }
+function orgMark() { orgDirty = true; orgRefreshBar(); }
+function orgBarInner() {
+    const msg = orgDirty
+        ? '<span style="color:var(--amber-600); font-weight:800;">● 저장하지 않은 변경이 있습니다</span>'
+        : '<span style="color:var(--emerald-700); font-weight:800;">✓ 서버에 저장됨</span>';
+    return `<div style="font-size:12.5px;">${msg}</div><button id="orgSaveBtn" class="btn ${orgDirty ? 'btn-emerald' : 'btn-outline'}" style="padding:10px 22px; font-size:14px;" onclick="saveMod2Org()">💾 조직도 저장</button>`;
+}
+function orgRefreshBar() { const bar = document.getElementById('orgSaveBar'); if (bar) bar.innerHTML = orgBarInner(); }
+window.addEventListener('beforeunload', (e) => { if (orgDirty) { e.preventDefault(); e.returnValue = ''; } });
+flushHooks.push(() => { if (orgDirty && !orgSaving) saveMod2Org(true); });
+
+// 화면의 입력값을 모아 회사 정보와 현장 정보를 서버에 저장
+async function saveMod2Org(silent) {
+    if (!orgCanEdit() || orgSaving) return;
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+    const comp = val('hqComp');
+    if (comp === null) return;                       // 화면이 열려 있지 않으면 저장할 값이 없음
+    if (!comp) { alert('회사명을 입력해 주세요.'); return; }
+    const newOrg = { companyName: comp, ceoName: val('hqCeo'), safetyManager: val('hqSafe'), advisorFirm: val('hqAdvi'), ceoDuty: val('hqDuty') };
+    const newSites = sitesData.map((s, i) => ({
+        id: s.id, name: val(`org_name_${i}`) || s.name, boss: val(`org_boss_${i}`), phone: val(`org_phone_${i}`),
+        safetyMgr: val(`org_safety_${i}`), civilMgr: val(`org_civil_${i}`), foremen: val(`org_foremen_${i}`)
+    }));
+    orgSaving = true;
+    setSaveStatus('saving');
+    const btn = document.getElementById('orgSaveBtn');
+    if (btn) { btn.disabled = true; btn.innerText = '저장 중…'; }
+    try {
+        const cres = await sb.from('companies').update({
+            name: newOrg.companyName,
+            info: { ceoName: newOrg.ceoName, ceoDuty: newOrg.ceoDuty, safetyManager: newOrg.safetyManager, advisorFirm: newOrg.advisorFirm }
+        }).eq('id', currentCompanyId);
+        if (cres.error) throw cres.error;
+        for (const s of newSites) {
+            const sres = await sb.from('sites').update({
+                name: s.name, info: { boss: s.boss, phone: s.phone, safetyMgr: s.safetyMgr, civilMgr: s.civilMgr, foremen: s.foremen }
+            }).eq('id', s.id);
+            if (sres.error) throw sres.error;
+        }
+    } catch (err) {
+        orgSaving = false;
+        srvFail('조직도 저장', err);
+        orgRefreshBar();
+        return;
+    }
+    orgSaving = false;
+    hqOrg = newOrg;
+    newSites.forEach((n, i) => { Object.assign(sitesData[i], n); });
+    const comp0 = companiesList.find(c => c.id === currentCompanyId);
+    if (comp0) comp0.name = newOrg.companyName;
+    orgDirty = false;
+    setSaveStatus('saved');
     document.getElementById('headerCompanyName').innerText = hqOrg.companyName;
     renderGlobalSitePills();
-    renderSiteManagerRows();
-    alert('화면에는 반영되었습니다.\n다만 조직도는 아직 서버에 연결되지 않아, 새로고침하면 서버에 등록된 내용으로 돌아갑니다.');
+    if (!silent && activeModule === 2) renderActiveModule(); else orgRefreshBar();
+}
+
+// 새 현장 추가 (본사·지노 계정). 현장용 로그인 계정은 노무그룹 지노에서 따로 만들어 연결
+async function orgAddSite() {
+    if (!orgCanEdit()) return;
+    const name = (prompt('추가할 현장 이름을 입력해 주세요.\n(예: OO동 신축공사)') || '').trim();
+    if (!name) return;
+    if (orgDirty) await saveMod2Org(true);
+    setSaveStatus('saving');
+    const res = await sb.from('sites').insert({ company_id: currentCompanyId, name: name, info: {}, sort_order: sitesData.length + 1 }).select('id').single();
+    if (res.error || !res.data) { srvFail('현장 추가', res.error || '응답 없음'); return; }
+    sitesData.push({ id: res.data.id, name: name, boss: '', phone: '', safetyMgr: '', civilMgr: '', foremen: '' });
+    setSaveStatus('saved');
+    renderGlobalSitePills();
+    renderActiveModule();
+    alert('"' + name + '" 현장이 추가되었습니다.\n소장·담당자 정보를 입력한 뒤 [조직도 저장]을 눌러 주세요.\n\n현장용 로그인 계정은 노무그룹 지노에 요청해 주세요.');
 }
 
 function openMod2Print() {
     document.getElementById('printModalTitle').innerText = '🖨️ 2. 안전보건 관리체계 및 조직도 (공식 A4)';
     document.getElementById('printSheetContent').innerHTML = `
         <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
-            <h1 style="font-size:20px; font-weight:900;">${hqOrg.companyName} 안전보건 관리체계 및 현장 조직도</h1>
+            <h1 style="font-size:20px; font-weight:900;">${esc(hqOrg.companyName)} 안전보건 관리체계 및 현장 조직도</h1>
         </div>
         <table class="a4-table">
-            <tr><th style="width:20%;">경영책임자</th><td><b>${hqOrg.ceoName}</b></td><th style="width:20%;">본사 안전총괄</th><td>${hqOrg.safetyManager}</td></tr>
-            <tr><th>자문 노무법인</th><td>${hqOrg.advisorFirm}</td><th>핵심 책무</th><td>${hqOrg.ceoDuty}</td></tr>
+            <tr><th style="width:20%;">경영책임자</th><td><b>${esc(hqOrg.ceoName)}</b></td><th style="width:20%;">본사 안전총괄</th><td>${esc(hqOrg.safetyManager)}</td></tr>
+            <tr><th>자문 노무법인</th><td>${esc(hqOrg.advisorFirm)}</td><th>핵심 책무</th><td>${esc(hqOrg.ceoDuty)}</td></tr>
         </table>
         <div style="font-weight:800; font-size:12px; margin:12px 0 6px;">🏗️ 현장별 안전보건 조직 및 담당자 현황</div>
         <table class="a4-table">
             <thead><tr><th>현장명</th><th>안전보건관리책임자(소장)</th><th>안전관리자(담당·업무)</th><th>공무·공사 담당자</th><th>공종별 반장(관리감독자)</th></tr></thead>
             <tbody>
-                ${sitesData.map(s => `<tr><td><b>${s.name}</b></td><td>${s.boss}<br><span style="font-size:10px;">(${s.phone})</span></td><td>${s.safetyMgr}</td><td>${s.civilMgr}</td><td>${s.foremen}</td></tr>`).join('')}
+                ${sitesData.map(s => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.boss)}${s.phone ? `<br><span style="font-size:10px;">(${esc(s.phone)})</span>` : ''}</td><td>${esc(s.safetyMgr)}</td><td>${esc(s.civilMgr)}</td><td>${esc(s.foremen)}</td></tr>`).join('')}
             </tbody>
         </table>
     `;
@@ -968,51 +979,56 @@ function openMod2Print() {
 }
 
 function renderModule2() {
+    const can = orgCanEdit();
+    const dis = can ? '' : 'disabled';
+    const inp = (id, label, value) => `<div><div class="form-label">${label}</div><input type="text" id="${id}" class="form-input" value="${esc(value)}" ${dis} oninput="orgMark()"></div>`;
     return `
         <div class="card">
             <div class="section-title">
-                <h2>🏛️ 2. 관리체계 및 본사·현장 조직도 편집 (담당자·업무 직접 수정)</h2>
-                <div style="display:flex; gap:6px;">
-                    <button class="btn btn-emerald" onclick="saveMod2Org()">✓ 조직도 변경사항 저장</button>
+                <h2>🏛️ 2. 관리체계 및 본사·현장 조직도 ${can ? '편집 (담당자·업무 직접 수정)' : '(열람)'}</h2>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    ${can ? '<button class="btn btn-emerald" onclick="orgAddSite()">+ 현장 추가</button>' : ''}
                     <button class="btn btn-amber" onclick="openMod2Print()">🖨️ 조직도 A4 프린트</button>
                 </div>
             </div>
+            ${can ? '' : '<div style="background:var(--slate-100); border:1px solid var(--slate-300); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">👁️ 조직도는 본사에서 관리합니다. 현장 계정은 자기 현장 정보의 열람과 인쇄만 할 수 있습니다.</div>'}
             <div class="section-box" style="border-left:4px solid var(--emerald-600);">
                 <div class="section-title">🏛️ 본사 안전보건 관리체계</div>
                 <div class="grid-2" style="margin-bottom:8px;">
-                    <div><div class="form-label">회사명</div><input type="text" id="hqComp" class="form-input" value="${hqOrg.companyName}"></div>
-                    <div><div class="form-label">경영책임자 (대표이사)</div><input type="text" id="hqCeo" class="form-input" value="${hqOrg.ceoName}"></div>
+                    ${inp('hqComp', '회사명', hqOrg.companyName)}
+                    ${inp('hqCeo', '경영책임자 (대표이사)', hqOrg.ceoName)}
                 </div>
                 <div class="grid-2" style="margin-bottom:8px;">
-                    <div><div class="form-label">본사 안전보건총괄 책임자</div><input type="text" id="hqSafe" class="form-input" value="${hqOrg.safetyManager}"></div>
-                    <div><div class="form-label">자문 노무법인</div><input type="text" id="hqAdvi" class="form-input" value="${hqOrg.advisorFirm}"></div>
+                    ${inp('hqSafe', '본사 안전보건총괄 책임자', hqOrg.safetyManager)}
+                    ${inp('hqAdvi', '자문 노무법인', hqOrg.advisorFirm)}
                 </div>
-                <div><div class="form-label">경영책임자 핵심 책무</div><input type="text" id="hqDuty" class="form-input" value="${hqOrg.ceoDuty}"></div>
+                ${inp('hqDuty', '경영책임자 핵심 책무', hqOrg.ceoDuty)}
             </div>
             <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                <div class="section-title">🏗️ 현장별 안전보건 조직도 및 담당자·업무 상세 수정 (${sitesData.length}개 현장)</div>
+                <div class="section-title">🏗️ 현장별 안전보건 조직도 및 담당자·업무 (${sitesData.length}개 현장)</div>
                 <div style="display:flex; flex-direction:column; gap:14px;">
                     ${sitesData.map((s, i) => `
                         <div style="background:#fff; border:1px solid var(--slate-300); border-radius:10px; padding:14px;">
-                            <div style="font-weight:900; color:var(--emerald-800); margin-bottom:10px; border-bottom:1px solid var(--slate-200); padding-bottom:6px;">🏗️ 현장 #${i+1}. ${s.name}</div>
+                            <div style="font-weight:900; color:var(--emerald-800); margin-bottom:10px; border-bottom:1px solid var(--slate-200); padding-bottom:6px;">🏗️ 현장 #${i + 1}. ${esc(s.name)}</div>
                             <div class="grid-3" style="margin-bottom:8px;">
-                                <div><div class="form-label">현장명</div><input type="text" id="org_name_${i}" class="form-input" value="${s.name}"></div>
-                                <div><div class="form-label">현장소장 (책임자)</div><input type="text" id="org_boss_${i}" class="form-input" value="${s.boss}"></div>
-                                <div><div class="form-label">현장 비상연락처</div><input type="text" id="org_phone_${i}" class="form-input" value="${s.phone}"></div>
+                                ${inp(`org_name_${i}`, '현장명', s.name)}
+                                ${inp(`org_boss_${i}`, '현장소장 (책임자)', s.boss)}
+                                ${inp(`org_phone_${i}`, '현장 비상연락처', s.phone)}
                             </div>
                             <div class="grid-3">
-                                <div><div class="form-label">안전관리자 (이름·담당업무)</div><input type="text" id="org_safety_${i}" class="form-input" value="${s.safetyMgr}"></div>
-                                <div><div class="form-label">공무·공사 (이름·담당업무)</div><input type="text" id="org_civil_${i}" class="form-input" value="${s.civilMgr}"></div>
-                                <div><div class="form-label">공종별 반장 (이름·담당업무)</div><input type="text" id="org_foremen_${i}" class="form-input" value="${s.foremen}"></div>
+                                ${inp(`org_safety_${i}`, '안전관리자 (이름·담당업무)', s.safetyMgr)}
+                                ${inp(`org_civil_${i}`, '공무·공사 (이름·담당업무)', s.civilMgr)}
+                                ${inp(`org_foremen_${i}`, '공종별 반장 (이름·담당업무)', s.foremen)}
                             </div>
                         </div>
                     `).join('')}
                 </div>
+                ${can ? '<div style="font-size:11px; color:var(--slate-500); margin-top:10px;">현장을 삭제하면 그 현장의 일지·점검표·사진이 모두 지워지므로, 삭제는 노무그룹 지노에 요청해 주세요.</div>' : ''}
             </div>
+            ${can ? `<div id="orgSaveBar" style="position:sticky; bottom:0; z-index:5; background:#fff; border:2px solid var(--emerald-600); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; box-shadow:0 -2px 10px rgba(0,0,0,0.08);">${orgBarInner()}</div>` : ''}
         </div>
     `;
 }
-
         // ====== [여기에 모듈 3 붙여넣기] ======
 // 일자별 TBM 일지 (서버 저장판)
 // 서버 기록 한 건 = 현장·일자 하나.  data = { time, people, presenter, checks[6], note, photos:[{ path, caption }] }
@@ -2044,34 +2060,10 @@ makeRecordModule({
 });
 function renderModule7() { return rmRender('drill'); }
         // ====== [여기에 모듈 8 붙여넣기] ======
-let mod8Auth = { mode: 'locked', role: null, ceoPw: '0000', bossPw: '1234' };
-
-// ① 대표이사 전용: 현장소장 평가 데이터 (현장별 분리)
-let mod8CeoEvalBySite = {
-    'jinjeop': [20, 20, 20, 16, 20],
-    'hongwon1': [20, 20, 16, 20, 20],
-    'hongwon2': [20, 16, 20, 20, 20]
-};
-
-// ②·③ 현장소장 전용: 안전관리자 및 관리감독자(공무·공사·반장) 평가 데이터
-let mod8BossEvalBySite = {
-    'jinjeop': {
-        safetyScores: [20, 20, 20, 20, 20],
-        superScores: [20, 20, 16, 20, 20],
-        comment: '안전관리자 및 공종별 관리감독자(공무·공사·반장) 반기 직무수행 양호'
-    },
-    'hongwon1': {
-        safetyScores: [20, 20, 20, 16, 20],
-        superScores: [20, 16, 20, 20, 20],
-        comment: '안전관리자 및 반장 직무수행 우수'
-    },
-    'hongwon2': {
-        safetyScores: [20, 20, 20, 20, 20],
-        superScores: [20, 20, 20, 16, 20],
-        comment: '안전관리자 및 반장 직무수행 우수'
-    }
-};
-
+// 책임자 등 반기평가 (서버 저장판) — 현장별·반기별, 두 종류의 평가를 따로 저장하고 각각 본사 최종 확인
+//   ① 대표이사의 현장소장 평가 (eval_boss)  : 본사·지노 계정만 작성·열람. 현장 계정은 서버에서부터 볼 수 없음
+//   ②③ 현장소장의 안전관리자·관리감독자 평가 (eval_staff) : 현장 계정이 작성, 본사가 확인
+// 점수: 우수 20 / 양호 16 / 보통 12 / 미흡 8.  아직 고르지 않은 항목은 0(미평가)
 const mod8CeoQuestions = [
     '1. 유해·위험요인 확인·개선(위험성평가) 및 일일 TBM 지휘·이행 실태',
     '2. 산업안전보건관리비 적정 집행 및 안전시설·보호구 적기 확보',
@@ -2079,7 +2071,6 @@ const mod8CeoQuestions = [
     '4. 종사자 의견청취(QR) 조치·회신 및 도급·수급인 안전점검',
     '5. 비상사태 대응훈련 실시 및 관계법령 안전조치 의무 준수'
 ];
-
 const mod8SafetyQuestions = [
     '1. 위험성평가 실시 보좌 및 현장 유해·위험요인 순회점검·지도',
     '2. 안전인증·자율안전확인 대상 보호구 적격품 선정 보좌',
@@ -2087,7 +2078,6 @@ const mod8SafetyQuestions = [
     '4. 산업재해 발생 원인 조사·분석 및 재발방지 기술적 보좌',
     '5. 법령 위반사항 시정 건의 및 안전보건 기록 유지·관리'
 ];
-
 const mod8SuperQuestions = [
     '1. 작업 전 일일 TBM 진행 및 보호구(안전모·안전대) 착용 직접 확인',
     '2. 담당 공정 기계·기구 및 설비의 안전·점검 및 이상 유무 확인',
@@ -2095,338 +2085,223 @@ const mod8SuperQuestions = [
     '4. 안전관리자의 지도·조언에 대한 현장 즉시 시정 및 협조',
     '5. 유해·위험 작업 시 특별안전보건교육 실시 및 작업중지권 보장'
 ];
-
-function handleMod8Login(role) {
-    const pw = document.getElementById('mod8PwInput').value.trim();
-    if (role === 'ceo' && pw === mod8Auth.ceoPw) {
-        mod8Auth.mode = 'authed'; mod8Auth.role = 'ceo'; renderActiveModule();
-    } else if (role === 'boss' && pw === mod8Auth.bossPw) {
-        mod8Auth.mode = 'authed'; mod8Auth.role = 'boss'; renderActiveModule();
-    } else {
-        alert('비밀번호가 일치하지 않습니다.\n• 대표이사 초기 비밀번호: ' + mod8Auth.ceoPw + '\n• 현장소장 초기 비밀번호: ' + mod8Auth.bossPw);
-    }
-}
-
-function openMod8Print() {
-    const siteId = currentSiteId === 'hq' ? sitesData[0].id : currentSiteId;
-    const siteObj = sitesData.find(s => s.id === siteId) || sitesData[0];
-    const isCeo = mod8Auth.role === 'ceo';
-
-    if (isCeo) {
-        const scores = mod8CeoEvalBySite[siteId] || [20,20,20,20,20];
-        const total = scores.reduce((a,b)=>a+b,0);
-        document.getElementById('printModalTitle').innerText = '🖨️ ① 안전보건관리책임자(현장소장) 반기 평가표 (대표이사 전용)';
-        document.getElementById('printSheetContent').innerHTML = `
-            <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
-                <h1 style="font-size:20px; font-weight:900;">① 안전보건관리책임자(현장소장) 반기 직무수행 평가표</h1>
-            </div>
-            <table class="a4-table">
-                <tr><th style="width:18%;">대상 현장</th><td style="width:32%;"><b>${siteObj.name}</b></td><th style="width:18%;">피평가자(소장)</th><td style="width:32%;"><b>${siteObj.boss}</b></td></tr>
-                <tr><th>평가자(전용)</th><td>${hqOrg.ceoName} (서명)</td><th>총점 / 등급</th><td style="font-weight:900; color:#7e22ce;">${total}점 / ${total>=90?'S(우수)':total>=80?'A(양호)':'B(보통)'}</td></tr>
-            </table>
-            <table class="a4-table">
-                <thead><tr><th>평가 항목 (안전보건관리책임자 법정 직무)</th><th style="width:80px;">배점</th><th style="width:80px;">득점</th></tr></thead>
-                <tbody>
-                    ${mod8CeoQuestions.map((q, idx) => `<tr><td>${q}</td><td style="text-align:center;">20점</td><td style="text-align:center; font-weight:800;">${scores[idx]}점</td></tr>`).join('')}
-                </tbody>
-            </table>
-        `;
-    } else {
-        const bData = mod8BossEvalBySite[siteId] || { safetyScores:[20,20,20,20,20], superScores:[20,20,20,20,20], comment:'' };
-        const sTotal = bData.safetyScores.reduce((a,b)=>a+b,0);
-        const mTotal = bData.superScores.reduce((a,b)=>a+b,0);
-        document.getElementById('printModalTitle').innerText = '🖨️ ② 안전관리자 · ③ 관리감독자 반기 평가표 (현장소장 전용)';
-        document.getElementById('printSheetContent').innerHTML = `
-            <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
-                <h1 style="font-size:20px; font-weight:900;">② 안전관리자 및 ③ 관리감독자 반기 직무수행 평가표</h1>
-            </div>
-            <table class="a4-table">
-                <tr><th style="width:18%;">대상 현장</th><td style="width:32%;"><b>${siteObj.name}</b></td><th style="width:18%;">평가자(현장소장)</th><td style="width:32%;"><b>${siteObj.boss} (서명)</b></td></tr>
-                <tr><th>② 안전관리자</th><td>${siteObj.safetyMgr} (<b>${sTotal}점</b>)</td><th>③ 관리감독자</th><td>${siteObj.civilMgr} / ${siteObj.foremen} (<b>${mTotal}점</b>)</td></tr>
-            </table>
-            <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[② 안전관리자 직무수행 평가 (총 ${sTotal}점)]</div>
-            <table class="a4-table">
-                <thead><tr><th>평가 항목</th><th style="width:70px;">배점</th><th style="width:70px;">득점</th></tr></thead>
-                <tbody>${mod8SafetyQuestions.map((q, idx) => `<tr><td>${q}</td><td style="text-align:center;">20점</td><td style="text-align:center; font-weight:800;">${bData.safetyScores[idx]}점</td></tr>`).join('')}</tbody>
-            </table>
-            <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[③ 관리감독자(공무·공사·반장) 직무수행 평가 (총 ${mTotal}점)]</div>
-            <table class="a4-table">
-                <thead><tr><th>평가 항목</th><th style="width:70px;">배점</th><th style="width:70px;">득점</th></tr></thead>
-                <tbody>${mod8SuperQuestions.map((q, idx) => `<tr><td>${q}</td><td style="text-align:center;">20점</td><td style="text-align:center; font-weight:800;">${bData.superScores[idx]}점</td></tr>`).join('')}</tbody>
-            </table>
-            <table class="a4-table"><tr><th style="width:18%;">소장 종합의견</th><td>${bData.comment}</td></tr></table>
-        `;
-    }
-    document.getElementById('printModal').classList.remove('hidden');
-}
-
-function renderModule8() {
-    if (mod8Auth.mode === 'locked') {
-        return `
-            <div class="card" style="text-align:center; padding:40px 20px; border:2px solid var(--amber-500); background:var(--amber-50);">
-                <div style="font-size:38px; margin-bottom:10px;">🔒</div>
-                <h2 style="font-size:20px; font-weight:900; color:var(--slate-900); margin-bottom:8px;">[보안 잠금] 책임자 등 반기 직무수행 평가 (권한 완벽 분리)</h2>
-                <p style="font-size:12.5px; color:var(--slate-600); max-width:580px; margin:0 auto 20px; line-height:1.6;">
-                    • <b>대표이사 입장(PW: 0000):</b> ① 안전보건관리책임자(현장소장) 평가 전용 (소장 열람 불가)<br>
-                    • <b>현장소장 입장(PW: 1234):</b> ② 안전관리자 및 ③ 관리감독자(공무·공사·반장) 평가 전용
-                </p>
-                <div style="max-width:300px; margin:0 auto 16px;">
-                    <input type="password" id="mod8PwInput" class="form-input" style="text-align:center; font-size:16px; letter-spacing:4px;" placeholder="비밀번호 입력">
-                </div>
-                <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
-                    <button class="btn btn-purple" onclick="handleMod8Login('ceo')">🔒 대표이사 전용 입장 (① 현장소장 평가)</button>
-                    <button class="btn btn-blue" onclick="handleMod8Login('boss')">🔒 현장소장 전용 입장 (②안전관리자·③감독자 평가)</button>
-                </div>
-            </div>
-        `;
-    }
-
-    const siteId = currentSiteId === 'hq' ? sitesData[0].id : currentSiteId;
-    const siteObj = sitesData.find(s => s.id === siteId) || sitesData[0];
-    const isCeo = mod8Auth.role === 'ceo';
-
-    if (isCeo) {
-        if (!mod8CeoEvalBySite[siteId]) mod8CeoEvalBySite[siteId] = [20,20,20,20,20];
-        const scores = mod8CeoEvalBySite[siteId];
-        const total = scores.reduce((a,b)=>a+b,0);
-        return `
-            <div class="card">
-                <div class="section-title" style="border-bottom:2px solid var(--purple-600); padding-bottom:10px;">
-                    <div>
-                        <span style="background:var(--purple-100); color:var(--purple-700); font-weight:800; font-size:11px; padding:3px 8px; border-radius:4px;">🛡️ 대표이사(경영책임자) 전용 보안 화면 — 현장소장 열람 불가</span>
-                        <h2 style="font-size:18px; font-weight:900; margin-top:6px;">① 안전보건관리책임자(현장소장) 반기 평가</h2>
-                    </div>
-                    <div style="display:flex; gap:6px;">
-                        <button class="btn btn-amber" onclick="openMod8Print()">🖨️ 소장 평가표 A4 프린트</button>
-                        <button class="btn btn-outline btn-sm" onclick="mod8Auth.mode='locked'; renderActiveModule();">🔒 잠금 및 로그아웃</button>
-                    </div>
-                </div>
-                <div class="section-box" style="border-left:4px solid var(--purple-600);">
-                    <div class="grid-3" style="margin-bottom:12px;">
-                        <div>
-                            <div class="form-label">평가 대상 현장 선택</div>
-                            <select class="form-select" onchange="selectGlobalSite(this.value)">
-                                ${sitesData.map(s => `<option value="${s.id}" ${s.id===siteId?'selected':''}>🏗️ ${s.name} (${s.boss})</option>`).join('')}
+const MOD8_SCORES = [[20, '우수 (20점)'], [16, '양호 (16점)'], [12, '보통 (12점)'], [8, '미흡 (8점)']];
+function mod8NormScores(a) { const s = Array.isArray(a) ? a.slice(0, 5).map(v => [20, 16, 12, 8].indexOf(Number(v)) >= 0 ? Number(v) : 0) : []; while (s.length < 5) s.push(0); return s; }
+function mod8Total(s) { return s.reduce((a, b) => a + b, 0); }
+function mod8Blank(s) { return s.filter(v => !v).length; }
+function mod8Grade(s) { if (mod8Blank(s)) return '평가 중'; const t = mod8Total(s); return t >= 90 ? 'S등급 우수' : (t >= 80 ? 'A등급 양호' : 'B등급 보통'); }
+function mod8ScoreTable(name, field, questions, scores, dis, who) {
+    return `<div class="law-table-wrap">
+        <table class="law-table">
+            <thead><tr><th>평가 항목</th><th style="width:70px;">배점</th><th style="width:150px;">${who} 평가</th><th style="width:75px;">점수</th></tr></thead>
+            <tbody>
+                ${questions.map((q, idx) => `
+                    <tr>
+                        <td><b>${q}</b></td>
+                        <td style="text-align:center;">20점</td>
+                        <td style="text-align:center;">
+                            <select class="form-select" ${dis} onchange="rmSetIdx('${name}', '${field}', ${idx}, Number(this.value), true)">
+                                <option value="0" ${scores[idx] ? '' : 'selected'}>(선택)</option>
+                                ${MOD8_SCORES.map(o => `<option value="${o[0]}" ${scores[idx] === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}
                             </select>
-                        </div>
-                        <div><div class="form-label">피평가자 (현장소장)</div><input type="text" class="form-input" value="${siteObj.boss}" readonly style="font-weight:800; background:#f8fafc;"></div>
-                        <div><div class="form-label">평가 총점 (대표이사 확정)</div><input type="text" class="form-input" value="${total}점 (${total>=90?'S등급 우수':total>=80?'A등급 양호':'B등급 보통'})" readonly style="font-weight:900; color:var(--purple-700);"></div>
-                    </div>
-                    <div class="law-table-wrap">
-                        <table class="law-table">
-                            <thead><tr><th>평가 항목 (① 안전보건관리책임자 직무)</th><th style="width:70px;">배점</th><th style="width:150px;">대표이사 평가</th><th style="width:75px;">점수</th></tr></thead>
-                            <tbody>
-                                ${mod8CeoQuestions.map((q, idx) => `
-                                    <tr>
-                                        <td><b>${q}</b></td>
-                                        <td style="text-align:center;">20점</td>
-                                        <td style="text-align:center;">
-                                            <select class="form-select" onchange="mod8CeoEvalBySite['${siteId}'][${idx}]=Number(this.value); renderActiveModule();">
-                                                <option value="20" ${scores[idx]===20?'selected':''}>우수 (20점)</option>
-                                                <option value="16" ${scores[idx]===16?'selected':''}>양호 (16점)</option>
-                                                <option value="12" ${scores[idx]===12?'selected':''}>보통 (12점)</option>
-                                                <option value="8" ${scores[idx]===8?'selected':''}>미흡 (8점)</option>
-                                            </select>
-                                        </td>
-                                        <td style="text-align:center; font-weight:800;">${scores[idx]}점</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                        </td>
+                        <td style="text-align:center; font-weight:800; color:${scores[idx] ? 'var(--slate-800)' : 'var(--amber-600)'};">${scores[idx] ? scores[idx] + '점' : '미평가'}</td>
+                    </tr>`).join('')}
+            </tbody>
+        </table>
+    </div>`;
+}
+function mod8PrintTable(questions, scores) {
+    return `<table class="a4-table">
+        <thead><tr><th>평가 항목</th><th style="width:70px;">배점</th><th style="width:70px;">득점</th></tr></thead>
+        <tbody>${questions.map((q, idx) => `<tr><td>${q}</td><td style="text-align:center;">20점</td><td style="text-align:center; font-weight:800;">${scores[idx] ? scores[idx] + '점' : '미평가'}</td></tr>`).join('')}</tbody>
+    </table>`;
+}
+
+// ① 대표이사의 현장소장 평가
+makeRecordModule({
+    id: 8, name: 'evb', module: 'eval_boss', mode: 'half', approval: true, managerOnly: true, photoKeys: [],
+    title: '① 안전보건관리책임자(현장소장) 반기 평가 <span style="background:var(--purple-100); color:var(--purple-700); font-weight:800; font-size:11px; padding:3px 8px; border-radius:4px; vertical-align:middle;">🛡️ 본사 전용 — 현장 계정 열람 불가</span>',
+    itemLabel: '소장 평가', newLabel: '+ 이 반기 소장 평가 작성', saveLabel: '소장 평가 저장', halfTitle: '평가 반기',
+    printLabel: '소장 평가표 A4 프린트',
+    printTitle: '🖨️ ① 안전보건관리책임자(현장소장) 반기 평가표',
+    blank: () => ({ date: todayStr(), evaluator: hqOrg.ceoName || '', scores: [0, 0, 0, 0, 0], comment: '' }),
+    normalize: (d) => ({ date: d.date || '', evaluator: d.evaluator || '', scores: mod8NormScores(d.scores), comment: d.comment || '' }),
+    confirmWarn: (r) => mod8Blank(r.scores) ? ['미평가 항목 ' + mod8Blank(r.scores) + '개가 남아 있습니다'] : [],
+    formHtml: (r, c) => `
+        <div class="section-box" style="border-left:4px solid var(--purple-600);">
+            <div class="grid-3" style="margin-bottom:12px;">
+                <div><div class="form-label">피평가자 (현장소장)</div><input type="text" class="form-input" value="${esc(c.siteObj.boss)}" readonly style="font-weight:800; background:#f8fafc;"></div>
+                ${rmInput(c.name, r, 'evaluator', '평가자 (대표이사)', c.dis, 'text', '예: 대표이사 홍길동')}
+                ${rmInput(c.name, r, 'date', '평가 일자', c.dis, 'date')}
             </div>
-        `;
-    } else {
-        if (!mod8BossEvalBySite[siteId]) {
-            mod8BossEvalBySite[siteId] = { safetyScores:[20,20,20,20,20], superScores:[20,20,20,20,20], comment:'직무수행 양호' };
-        }
-        const bData = mod8BossEvalBySite[siteId];
-        const sTotal = bData.safetyScores.reduce((a,b)=>a+b,0);
-        const mTotal = bData.superScores.reduce((a,b)=>a+b,0);
-        return `
-            <div class="card">
-                <div class="section-title" style="border-bottom:2px solid var(--blue-600); padding-bottom:10px;">
-                    <div>
-                        <span style="background:var(--blue-100); color:var(--blue-700); font-weight:800; font-size:11px; padding:3px 8px; border-radius:4px;">👷 현장소장 전용 보안 화면 — 대표이사의 소장 평가 내역은 숨김 처리됨</span>
-                        <h2 style="font-size:18px; font-weight:900; margin-top:6px;">② 안전관리자 및 ③ 관리감독자(공무·공사·반장) 반기 평가</h2>
-                    </div>
-                    <div style="display:flex; gap:6px;">
-                        <button class="btn btn-amber" onclick="openMod8Print()">🖨️ 소장용 평가표 A4 프린트</button>
-                        <button class="btn btn-outline btn-sm" onclick="mod8Auth.mode='locked'; renderActiveModule();">🔒 잠금 및 로그아웃</button>
-                    </div>
-                </div>
-                <div class="section-box" style="border-left:4px solid var(--emerald-600);">
-                    <div class="grid-3">
-                        <div>
-                            <div class="form-label">소속 현장 선택</div>
-                            <select class="form-select" onchange="selectGlobalSite(this.value)">
-                                ${sitesData.map(s => `<option value="${s.id}" ${s.id===siteId?'selected':''}>🏗️ ${s.name} (${s.boss})</option>`).join('')}
-                            </select>
-                        </div>
-                        <div><div class="form-label">평가자 (현장소장)</div><input type="text" class="form-input" value="${siteObj.boss}" readonly style="font-weight:800;"></div>
-                        <div><div class="form-label">평가 요약</div><input type="text" class="form-input" value="안전관리자 ${sTotal}점 / 관리감독자 ${mTotal}점" readonly style="font-weight:800; color:var(--blue-700);"></div>
-                    </div>
-                </div>
-                <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                    <div class="section-title"><span>② 안전관리자 직무수행 평가 (대상: ${siteObj.safetyMgr})</span><span style="color:var(--blue-700);">총점: ${sTotal}점</span></div>
-                    <div class="law-table-wrap">
-                        <table class="law-table">
-                            <thead><tr><th>평가 항목 (② 안전관리자 직무)</th><th style="width:70px;">배점</th><th style="width:150px;">소장 평가</th><th style="width:75px;">점수</th></tr></thead>
-                            <tbody>
-                                ${mod8SafetyQuestions.map((q, idx) => `
-                                    <tr>
-                                        <td><b>${q}</b></td><td style="text-align:center;">20점</td>
-                                        <td><select class="form-select" onchange="mod8BossEvalBySite['${siteId}'].safetyScores[${idx}]=Number(this.value); renderActiveModule();">
-                                            <option value="20" ${bData.safetyScores[idx]===20?'selected':''}>우수 (20점)</option>
-                                            <option value="16" ${bData.safetyScores[idx]===16?'selected':''}>양호 (16점)</option>
-                                            <option value="12" ${bData.safetyScores[idx]===12?'selected':''}>보통 (12점)</option>
-                                        </select></td>
-                                        <td style="text-align:center; font-weight:800;">${bData.safetyScores[idx]}점</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="section-box" style="border-left:4px solid var(--amber-500);">
-                    <div class="section-title"><span>③ 관리감독자(공무·공사·반장) 직무수행 평가 (대상: ${siteObj.civilMgr} / ${siteObj.foremen})</span><span style="color:var(--amber-600);">총점: ${mTotal}점</span></div>
-                    <div class="law-table-wrap">
-                        <table class="law-table">
-                            <thead><tr><th>평가 항목 (③ 관리감독자 직무)</th><th style="width:70px;">배점</th><th style="width:150px;">소장 평가</th><th style="width:75px;">점수</th></tr></thead>
-                            <tbody>
-                                ${mod8SuperQuestions.map((q, idx) => `
-                                    <tr>
-                                        <td><b>${q}</b></td><td style="text-align:center;">20점</td>
-                                        <td><select class="form-select" onchange="mod8BossEvalBySite['${siteId}'].superScores[${idx}]=Number(this.value); renderActiveModule();">
-                                            <option value="20" ${bData.superScores[idx]===20?'selected':''}>우수 (20점)</option>
-                                            <option value="16" ${bData.superScores[idx]===16?'selected':''}>양호 (16점)</option>
-                                            <option value="12" ${bData.superScores[idx]===12?'selected':''}>보통 (12점)</option>
-                                        </select></td>
-                                        <td style="text-align:center; font-weight:800;">${bData.superScores[idx]}점</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div style="margin-top:10px;"><div class="form-label">현장소장 종합 평가의견</div><input type="text" class="form-input" value="${bData.comment}" onchange="mod8BossEvalBySite['${siteId}'].comment=this.value"></div>
-                </div>
-            </div>
-        `;
-    }
-}
-
-
-        // ====== [여기에 모듈 9 붙여넣기] ======
-let mod9BudgetRows = [
-    { cat: '안전시설비', name: '개구부 표준 안전난간·추락방호망·안전통로 자재 구입 및 설치', plan: 18000000, exec: 16500000, note: '전 현장 설치 완료' },
-    { cat: '개인보호구', name: '안전인증(KCs) 안전모·안전화·안전대·각반·보안경 구입 지급', plan: 6500000, exec: 6200000, note: '신규 투입 근로자 전원 지급' },
-    { cat: '안전보건교육·진단', name: '안전보건 교육교재·표지판 제작 및 전문기관 컨설팅 비용', plan: 8000000, exec: 8000000, note: '반기 안전보건 컨설팅 및 점검' },
-    { cat: '근로자 건강보호', name: '근로자 휴게시설 냉·난방기, 식수 설비, 구급약품, 폭염·한파 보호장구', plan: 5500000, exec: 5100000, note: '현장 휴게실 비품 완비' }
-];
-
-let mod9Photos = [
-    { url: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="#ecfdf5"/><text x="240" y="160" fill="#047857" font-size="16" font-weight="bold" text-anchor="middle">안전보호구 및 안전시설 입고 증빙</text></svg>'), caption: '안전보호구 및 추락방지 자재 반입·지급 증빙 사진' }
-];
-
-function addMod9Row() {
-    mod9BudgetRows.push({ cat: '기타안전비', name: '신규 안전보건 집행 항목 입력', plan: 1000000, exec: 1000000, note: '증빙 확보' });
-    renderActiveModule();
-}
-
-function handleMod9PhotoUpload(event) {
-    Array.from(event.target.files || []).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            mod9Photos.push({ url: e.target.result, caption: file.name.replace(/\.[^/.]+$/, '') });
-            renderActiveModule();
-        };
-        reader.readAsDataURL(file);
-    });
-}
-
-function openMod9Print() {
-    const totalPlan = mod9BudgetRows.reduce((a,b)=>a+Number(b.plan||0), 0);
-    const totalExec = mod9BudgetRows.reduce((a,b)=>a+Number(b.exec||0), 0);
-    const rate = totalPlan > 0 ? ((totalExec / totalPlan) * 100).toFixed(1) : '0.0';
-    document.getElementById('printModalTitle').innerText = '🖨️ 9. 안전보건 예산 편성 및 집행 실적 보고서 (공식 A4)';
-    document.getElementById('printSheetContent').innerHTML = `
+            <div style="margin-bottom:10px;"><div class="form-label">평가 총점</div><input type="text" class="form-input" value="${mod8Total(r.scores)}점 (${mod8Grade(r.scores)})" readonly style="font-weight:900; color:var(--purple-700);"></div>
+            ${mod8ScoreTable(c.name, 'scores', mod8CeoQuestions, r.scores, c.dis, '대표이사')}
+            <div style="margin-top:10px;">${rmInput(c.name, r, 'comment', '대표이사 종합 평가의견', c.dis)}</div>
+        </div>`,
+    printHtml: (r, p) => `
         <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
-            <h1 style="font-size:20px; font-weight:900;">${hqOrg.companyName} 안전보건 예산 편성 및 집행 관리대장</h1>
+            <h1 style="font-size:20px; font-weight:900;">① 안전보건관리책임자(현장소장) 반기 직무수행 평가표</h1>
         </div>
         <table class="a4-table">
-            <tr><th style="width:20%;">적용 소속</th><td><b>${getSiteLabelById(currentSiteId)}</b></td><th style="width:20%;">총 집행률</th><td style="font-weight:900; color:#047857;">${rate}% (${totalExec.toLocaleString()}원 / ${totalPlan.toLocaleString()}원)</td></tr>
+            <tr><th style="width:18%;">대상 현장</th><td style="width:32%;"><b>${esc(p.siteObj.name)}</b></td><th style="width:18%;">피평가자(소장)</th><td style="width:32%;"><b>${esc(p.siteObj.boss)}</b></td></tr>
+            <tr><th>평가 반기 / 일자</th><td>${p.halfLabel}<br>${esc(r.date)}</td><th>평가자</th><td>${esc(r.evaluator)}</td></tr>
+            <tr><th>총점 / 등급</th><td colspan="3" style="font-weight:900; color:#7e22ce;">${mod8Total(r.scores)}점 / ${mod8Grade(r.scores)}</td></tr>
+        </table>
+        ${mod8PrintTable(mod8CeoQuestions, r.scores)}
+        <table class="a4-table"><tr><th style="width:18%;">종합 평가의견</th><td>${esc(r.comment)}</td></tr></table>
+        ${p.approvalRow}`
+});
+
+// ②③ 현장소장의 안전관리자·관리감독자 평가
+makeRecordModule({
+    id: 8, name: 'evs', module: 'eval_staff', mode: 'half', approval: true, photoKeys: [],
+    title: '② 안전관리자 및 ③ 관리감독자(공무·공사·반장) 반기 평가',
+    itemLabel: '관리자 평가', newLabel: '+ 이 반기 관리자 평가 작성', saveLabel: '관리자 평가 저장', halfTitle: '평가 반기',
+    printLabel: '관리자 평가표 A4 프린트',
+    printTitle: '🖨️ ② 안전관리자 · ③ 관리감독자 반기 평가표',
+    blank: (siteId) => ({ date: todayStr(), evaluator: ((sitesData.find(s => s.id === siteId) || {}).boss) || '', safetyScores: [0, 0, 0, 0, 0], superScores: [0, 0, 0, 0, 0], comment: '' }),
+    normalize: (d) => ({ date: d.date || '', evaluator: d.evaluator || '', safetyScores: mod8NormScores(d.safetyScores), superScores: mod8NormScores(d.superScores), comment: d.comment || '' }),
+    confirmWarn: (r) => { const n = mod8Blank(r.safetyScores) + mod8Blank(r.superScores); return n ? ['미평가 항목 ' + n + '개가 남아 있습니다'] : []; },
+    formHtml: (r, c) => `
+        <div class="section-box" style="border-left:4px solid var(--emerald-600);">
+            <div class="grid-3">
+                ${rmInput(c.name, r, 'evaluator', '평가자 (현장소장)', c.dis, 'text', '예: 홍길동 소장')}
+                ${rmInput(c.name, r, 'date', '평가 일자', c.dis, 'date')}
+                <div><div class="form-label">평가 요약</div><input type="text" class="form-input" value="안전관리자 ${mod8Total(r.safetyScores)}점 / 관리감독자 ${mod8Total(r.superScores)}점" readonly style="font-weight:800; color:var(--blue-700);"></div>
+            </div>
+        </div>
+        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+            <div class="section-title"><span>② 안전관리자 직무수행 평가 (대상: ${esc(c.siteObj.safetyMgr) || '미등록'})</span><span style="color:var(--blue-700);">총점: ${mod8Total(r.safetyScores)}점</span></div>
+            ${mod8ScoreTable(c.name, 'safetyScores', mod8SafetyQuestions, r.safetyScores, c.dis, '소장')}
+        </div>
+        <div class="section-box" style="border-left:4px solid var(--amber-500);">
+            <div class="section-title"><span>③ 관리감독자(공무·공사·반장) 직무수행 평가 (대상: ${esc([c.siteObj.civilMgr, c.siteObj.foremen].filter(Boolean).join(' / ')) || '미등록'})</span><span style="color:var(--amber-600);">총점: ${mod8Total(r.superScores)}점</span></div>
+            ${mod8ScoreTable(c.name, 'superScores', mod8SuperQuestions, r.superScores, c.dis, '소장')}
+            <div style="margin-top:10px;">${rmInput(c.name, r, 'comment', '현장소장 종합 평가의견', c.dis)}</div>
+        </div>`,
+    printHtml: (r, p) => `
+        <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
+            <h1 style="font-size:20px; font-weight:900;">② 안전관리자 및 ③ 관리감독자 반기 직무수행 평가표</h1>
+        </div>
+        <table class="a4-table">
+            <tr><th style="width:18%;">대상 현장</th><td style="width:32%;"><b>${esc(p.siteObj.name)}</b></td><th style="width:18%;">평가자(현장소장)</th><td style="width:32%;"><b>${esc(r.evaluator)}</b></td></tr>
+            <tr><th>평가 반기 / 일자</th><td>${p.halfLabel}<br>${esc(r.date)}</td><th>평가 요약</th><td>안전관리자 <b>${mod8Total(r.safetyScores)}점</b> / 관리감독자 <b>${mod8Total(r.superScores)}점</b></td></tr>
+            <tr><th>② 안전관리자</th><td>${esc(p.siteObj.safetyMgr)}</td><th>③ 관리감독자</th><td>${esc([p.siteObj.civilMgr, p.siteObj.foremen].filter(Boolean).join(' / '))}</td></tr>
+        </table>
+        <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[② 안전관리자 직무수행 평가 (총 ${mod8Total(r.safetyScores)}점)]</div>
+        ${mod8PrintTable(mod8SafetyQuestions, r.safetyScores)}
+        <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[③ 관리감독자(공무·공사·반장) 직무수행 평가 (총 ${mod8Total(r.superScores)}점)]</div>
+        ${mod8PrintTable(mod8SuperQuestions, r.superScores)}
+        <table class="a4-table"><tr><th style="width:18%;">소장 종합의견</th><td>${esc(r.comment)}</td></tr></table>
+        ${p.approvalRow}`
+});
+
+// 본사·지노 계정은 두 평가를 탭으로 오가고, 현장 계정은 ②③ 평가만 봄
+let mod8Tab = 'boss';
+function mod8SetTab(t) { runFlushHooks(); mod8Tab = t; renderActiveModule(); }
+function renderModule8() {
+    if (isSiteBoss()) return rmRender('evs');
+    const tab = (id, label) => `<button class="site-pill ${mod8Tab === id ? 'active' : ''}" onclick="mod8SetTab('${id}')">${label}</button>`;
+    return `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+            ${tab('boss', '① 현장소장 평가 (대표이사 작성)')}${tab('staff', '②③ 안전관리자·관리감독자 평가 (현장소장 작성)')}
+        </div>` + rmRender(mod8Tab === 'boss' ? 'evb' : 'evs');
+}
+        // ====== [여기에 모듈 9 붙여넣기] ======
+// 안전보건 예산관리 (서버 저장판) — 회사 공통·연도별.  본사·지노 계정만 볼 수 있고, 본사 최종 확인
+// 서버 기록 한 건 = 회사·연도 하나.  data = { date(작성일), writer, rows:[{ cat, name, plan, exec, note }], photos }
+function mod9Num(v) { const n = Number(v); return isFinite(n) && n > 0 ? Math.round(n) : 0; }
+function mod9Sum(rows) {
+    const plan = rows.reduce((a, b) => a + mod9Num(b.plan), 0);
+    const exec = rows.reduce((a, b) => a + mod9Num(b.exec), 0);
+    return { plan: plan, exec: exec, rate: plan > 0 ? ((exec / plan) * 100).toFixed(1) : '0.0' };
+}
+makeRecordModule({
+    id: 9, name: 'bud', module: 'budget', mode: 'year', scope: 'company', approval: true, managerOnly: true, photoKeys: ['photos'],
+    title: '💰 9. 안전보건 예산 편성 및 집행 관리대장',
+    itemLabel: '예산대장', newLabel: '+ 이 연도 예산대장 작성', saveLabel: '예산대장 저장', halfTitle: '예산 연도',
+    printLabel: '예산대장 A4 프린트',
+    printTitle: '🖨️ 9. 안전보건 예산 편성 및 집행 실적 보고서 (공식 A4)',
+    blank: () => ({
+        date: todayStr(), writer: '',
+        rows: ['안전시설비', '개인보호구', '안전보건교육·진단', '근로자 건강보호'].map(c => ({ cat: c, name: '', plan: 0, exec: 0, note: '' })),
+        photos: []
+    }),
+    normalize: (d) => {
+        const rows = (Array.isArray(d.rows) ? d.rows : []).map(r => ({ cat: (r && r.cat) || '', name: (r && r.name) || '', plan: mod9Num(r && r.plan), exec: mod9Num(r && r.exec), note: (r && r.note) || '' }));
+        if (!rows.length) rows.push({ cat: '', name: '', plan: 0, exec: 0, note: '' });
+        return { date: d.date || '', writer: d.writer || '', rows: rows, photos: normPhotos(d.photos) };
+    },
+    confirmWarn: (r) => {
+        const w = [];
+        if (!mod9Sum(r.rows).plan) w.push('편성 예산이 0원입니다');
+        if (!r.photos.length) w.push('증빙 사진이 없습니다');
+        return w;
+    },
+    formHtml: (r, c) => {
+        const s = mod9Sum(r.rows);
+        const cell = (idx, sub, type, rerender) => `<input type="${type}" class="form-input" ${type === 'number' ? 'min="0" step="1000"' : ''} value="${esc(r.rows[idx][sub])}" ${c.dis} onchange="rmRowSet('${c.name}', 'rows', ${idx}, '${sub}', ${type === 'number' ? 'mod9Num(this.value)' : 'this.value'}, ${rerender})">`;
+        return `
+        <div class="section-box" style="border-left:4px solid var(--emerald-600);">
+            <div class="grid-2" style="margin-bottom:10px;">
+                ${rmInput(c.name, r, 'date', '작성일', c.dis, 'date')}
+                ${rmInput(c.name, r, 'writer', '작성자', c.dis, 'text', '예: 홍길동 과장')}
+            </div>
+            <div class="grid-3">
+                <div><div class="form-label">총 편성 예산액</div><input type="text" class="form-input" value="${s.plan.toLocaleString()} 원" readonly style="font-weight:800;"></div>
+                <div><div class="form-label">총 집행 실적액</div><input type="text" class="form-input" value="${s.exec.toLocaleString()} 원" readonly style="font-weight:800; color:var(--blue-700);"></div>
+                <div><div class="form-label">예산 집행률</div><input type="text" class="form-input" value="${s.rate} %" readonly style="font-weight:900; color:var(--emerald-700);"></div>
+            </div>
+        </div>
+        <div class="law-table-wrap" style="margin-bottom:8px;">
+            <table class="law-table">
+                <thead><tr><th style="width:130px;">항목 구분</th><th>세부 내역 (직접 수정)</th><th style="width:135px;">편성 예산(원)</th><th style="width:135px;">집행 금액(원)</th><th style="width:170px;">비고</th>${c.locked ? '' : '<th style="width:65px;">관리</th>'}</tr></thead>
+                <tbody>
+                    ${r.rows.map((row, idx) => `
+                        <tr>
+                            <td>${cell(idx, 'cat', 'text', false)}</td>
+                            <td>${cell(idx, 'name', 'text', false)}</td>
+                            <td>${cell(idx, 'plan', 'number', true)}</td>
+                            <td>${cell(idx, 'exec', 'number', true)}</td>
+                            <td>${cell(idx, 'note', 'text', false)}</td>
+                            ${c.locked ? '' : `<td style="text-align:center;"><button class="btn btn-red btn-sm" onclick="rmRowDel('${c.name}', 'rows', ${idx})">삭제</button></td>`}
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${c.locked ? '' : `<div style="margin-bottom:16px;"><button class="btn btn-emerald btn-sm" onclick="rmRowAdd('${c.name}', 'rows', { cat: '', name: '', plan: 0, exec: 0, note: '' })">+ 예산 항목 추가</button></div>`}
+        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+            <div class="section-title">
+                <span>📸 안전보건 예산 집행 증빙 사진 (세금계산서·반입사진·지급대장 등)</span>
+                ${rmUploadBtn(c.name, 'photos', '📷 + 증빙 사진 업로드', 'btn-blue', c.locked)}
+            </div>
+            ${c.uploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 사진 ${c.uploading}장 올리는 중…</div>` : ''}
+            ${r.photos.length || c.uploading > 0 ? '' : '<div style="font-size:12px; color:var(--slate-500);">아직 올린 사진이 없습니다.</div>'}
+            ${rmPhotoGrid(c.name, 'photos', r.photos, c.locked)}
+        </div>`;
+    },
+    printHtml: (r, p) => {
+        const s = mod9Sum(r.rows);
+        return `
+        <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
+            <h1 style="font-size:20px; font-weight:900;">${p.siteLabel} 안전보건 예산 편성 및 집행 관리대장</h1>
+        </div>
+        <table class="a4-table">
+            <tr><th style="width:20%;">예산 연도</th><td><b>${p.halfLabel}</b></td><th style="width:20%;">작성일 / 작성자</th><td>${esc(r.date)} / ${esc(r.writer)}</td></tr>
+            <tr><th>총 집행률</th><td colspan="3" style="font-weight:900; color:#047857;">${s.rate}% (${s.exec.toLocaleString()}원 / ${s.plan.toLocaleString()}원)</td></tr>
         </table>
         <table class="a4-table">
             <thead><tr><th style="width:110px;">구분</th><th>세부 편성 및 집행 내역</th><th style="width:110px;">편성액(원)</th><th style="width:110px;">집행액(원)</th><th style="width:150px;">비고</th></tr></thead>
             <tbody>
-                ${mod9BudgetRows.map(r => `<tr><td style="text-align:center; font-weight:700;">${r.cat}</td><td>${r.name}</td><td style="text-align:right;">${Number(r.plan).toLocaleString()}</td><td style="text-align:right; font-weight:800;">${Number(r.exec).toLocaleString()}</td><td>${r.note}</td></tr>`).join('')}
+                ${r.rows.map(row => `<tr><td style="text-align:center; font-weight:700;">${esc(row.cat)}</td><td>${esc(row.name)}</td><td style="text-align:right;">${mod9Num(row.plan).toLocaleString()}</td><td style="text-align:right; font-weight:800;">${mod9Num(row.exec).toLocaleString()}</td><td>${esc(row.note)}</td></tr>`).join('')}
             </tbody>
         </table>
+        ${p.approvalRow}
         <div style="font-weight:800; font-size:12px; margin:10px 0 6px;">📸 안전보건 예산 집행 및 물품 반입 증빙 사진</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            ${mod9Photos.map(p => `<div style="border:1px solid #334155; padding:6px; text-align:center;"><img src="${p.url}" style="max-height:160px; max-width:100%; object-fit:cover;"><div style="font-size:11px; margin-top:4px; font-weight:700;">${p.caption}</div></div>`).join('')}
-        </div>
-    `;
-    document.getElementById('printModal').classList.remove('hidden');
-}
-
-function renderModule9() {
-    const totalPlan = mod9BudgetRows.reduce((a,b)=>a+Number(b.plan||0), 0);
-    const totalExec = mod9BudgetRows.reduce((a,b)=>a+Number(b.exec||0), 0);
-    const rate = totalPlan > 0 ? ((totalExec / totalPlan) * 100).toFixed(1) : '0.0';
-    return `
-        <div class="card">
-            <div class="section-title">
-                <h2>💰 9. 안전보건 예산 편성 및 집행 관리대장</h2>
-                <div style="display:flex; gap:6px;">
-                    <button class="btn btn-emerald btn-sm" onclick="addMod9Row()">+ 예산 항목 추가</button>
-                    <button class="btn btn-amber" onclick="openMod9Print()">🖨️ 예산대장 A4 프린트</button>
-                </div>
-            </div>
-            <div class="section-box" style="border-left:4px solid var(--emerald-600);">
-                <div class="grid-3">
-                    <div><div class="form-label">총 편성 예산액</div><input type="text" class="form-input" value="${totalPlan.toLocaleString()} 원" readonly style="font-weight:800;"></div>
-                    <div><div class="form-label">총 집행 실적액</div><input type="text" class="form-input" value="${totalExec.toLocaleString()} 원" readonly style="font-weight:800; color:var(--blue-700);"></div>
-                    <div><div class="form-label">예산 집행률</div><input type="text" class="form-input" value="${rate} %" readonly style="font-weight:900; color:var(--emerald-700);"></div>
-                </div>
-            </div>
-            <div class="law-table-wrap" style="margin-bottom:16px;">
-                <table class="law-table">
-                    <thead><tr><th style="width:120px;">항목 구분</th><th>세부 내역 (직접 수정)</th><th style="width:130px;">편성 예산(원)</th><th style="width:130px;">집행 금액(원)</th><th style="width:170px;">비고</th><th style="width:65px;">관리</th></tr></thead>
-                    <tbody>
-                        ${mod9BudgetRows.map((r, idx) => `
-                            <tr>
-                                <td><input type="text" class="form-input" value="${r.cat}" onchange="mod9BudgetRows[${idx}].cat=this.value"></td>
-                                <td><input type="text" class="form-input" value="${r.name}" onchange="mod9BudgetRows[${idx}].name=this.value"></td>
-                                <td><input type="number" class="form-input" value="${r.plan}" onchange="mod9BudgetRows[${idx}].plan=Number(this.value); renderActiveModule();"></td>
-                                <td><input type="number" class="form-input" value="${r.exec}" onchange="mod9BudgetRows[${idx}].exec=Number(this.value); renderActiveModule();"></td>
-                                <td><input type="text" class="form-input" value="${r.note}" onchange="mod9BudgetRows[${idx}].note=this.value"></td>
-                                <td style="text-align:center;"><button class="btn btn-red btn-sm" onclick="if(mod9BudgetRows.length>1){mod9BudgetRows.splice(${idx},1);renderActiveModule();}">삭제</button></td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                <div class="section-title">
-                    <span>📸 안전보건 예산 집행 증빙 사진 (세금계산서·반입사진·지급대장 등)</span>
-                    <label class="btn btn-blue btn-sm" style="cursor:pointer;">📷 + 증빙 사진 업로드<input type="file" accept="image/*" multiple class="hidden" onchange="handleMod9PhotoUpload(event)"></label>
-                </div>
-                <div class="photo-grid">
-                    ${mod9Photos.map((p, idx) => `
-                        <div class="photo-card">
-                            <img src="${p.url}">
-                            <div class="photo-actions"><button class="btn btn-red btn-sm" onclick="mod9Photos.splice(${idx},1); renderActiveModule();">✕ 삭제</button></div>
-                            <input type="text" class="photo-caption-input" value="${p.caption}" onchange="mod9Photos[${idx}].caption=this.value">
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        </div>
-    `;
-}
-
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">${rmPrintPhotos(r.photos)}</div>`;
+    }
+});
+function renderModule9() { return rmRender('bud'); }
    // ====== [로그인 · 권한 — 서버 연결판] ======
         const ROLE_LABELS = {
             jino_admin: '👑 지노 관리자',
@@ -2522,8 +2397,6 @@ function renderModule9() {
                 return showLogin('서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
             }
 
-            loadAllDataFromLocal();
-            applyRoleToMod8(appUser.role);
             document.getElementById('headerCompanyName').innerText = hqOrg.companyName;
             document.title = hqOrg.companyName + ' × 노무그룹 지노 - 중대재해처벌법 안전보건 통합관리 시스템';
             injectUserBadge();
@@ -2531,29 +2404,14 @@ function renderModule9() {
             renderSidebar(); renderGlobalSitePills(); renderActiveModule();
         }
 
-        function applyRoleToMod8(role) {
-            if (typeof mod8Auth === 'undefined') return;
-            mod8Auth.mode = 'authed';
-            mod8Auth.role = (role === 'site_boss') ? 'boss' : 'ceo';
-        }
-
         function injectUserBadge() {
             const ctrl = document.querySelector('.header-controls');
             if (!ctrl) return;
-            const isJino = appUser.role === 'jino_admin' || appUser.role === 'jino_staff';
             ctrl.innerHTML = `
                 <span id="saveStatusPill" style="font-size:11.5px; font-weight:800; padding:5px 10px; border-radius:6px; border:1px solid #475569; color:#94a3b8;">서버 연결됨</span>
-                ${isJino ? '<button class="btn btn-purple btn-sm" onclick="toggleMasterMod8View()">🔄 8번평가 뷰 전환</button>' : ''}
                 <span style="font-size:12px; font-weight:700; color:#e2e8f0;">${ROLE_LABELS[appUser.role] || ''} · ${appUser.displayName}</span>
                 <button class="btn btn-outline btn-sm" style="background:#1e293b; color:#34d399; border-color:#059669;" onclick="doLogout()">로그아웃</button>
             `;
-        }
-
-        function toggleMasterMod8View() {
-            if (typeof mod8Auth === 'undefined') return;
-            mod8Auth.mode = 'authed';
-            mod8Auth.role = (mod8Auth.role === 'ceo') ? 'boss' : 'ceo';
-            switchModule(8);
         }
 
         async function bootApp() {
