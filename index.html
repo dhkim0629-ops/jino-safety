@@ -86,6 +86,32 @@
             #printModal .modal-body { padding: 0; background: #fff; overflow: visible; }
             #printModal .a4-sheet { box-shadow: none; border: none; max-width: 100%; padding: 6mm; }
         }
+        /* ---------- 휴대폰·좁은 화면 ---------- */
+        .menu-toggle { display: none; }
+        @media (max-width: 920px) {
+            .app-header { position: static; padding: 10px 12px; }
+            .brand-title { font-size: 14px; flex-wrap: wrap; }
+            .brand-sub, .badge-jino { display: none; }
+            .header-inner { gap: 8px; }
+            .main-container { margin: 10px auto; padding: 0 8px; gap: 10px; }
+            .sidebar { padding: 8px 10px; position: sticky !important; top: 0; z-index: 30; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+            .sidebar .side-title { display: none; }
+            .menu-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; background: transparent; border: 0; padding: 4px 2px; font-family: inherit; font-size: 14px; color: var(--emerald-800); cursor: pointer; text-align: left; }
+            .menu-toggle-btn { flex-shrink: 0; background: var(--emerald-600); color: #fff; font-size: 12.5px; font-weight: 800; padding: 7px 12px; border-radius: 7px; }
+            #sidebarNavList { display: none; }
+            .sidebar.open #sidebarNavList { display: block; margin-top: 8px; max-height: 70vh; overflow-y: auto; }
+            .nav-btn { padding: 12px 11px; font-size: 14px; }
+            .content-area { gap: 10px; width: 100%; }
+            .context-bar { padding: 8px 10px; }
+            .card { padding: 12px; }
+            .section-box { padding: 12px; margin-bottom: 12px; }
+            .section-title { font-size: 13.5px; }
+            .btn { padding: 9px 12px; font-size: 13px; }
+            .btn-sm { padding: 7px 10px; font-size: 12px; }
+            .site-pill { padding: 8px 11px; font-size: 13px; }
+            /* 입력 칸 글자가 16px보다 작으면 아이폰이 화면을 자동 확대하므로 16px로 맞춤 */
+            .form-input, .form-select, .form-textarea, .photo-caption-input { font-size: 16px; }
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -106,7 +132,8 @@
 
     <div class="main-container">
         <aside class="sidebar">
-            <div style="font-size:11px; font-weight:800; color:var(--slate-500); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--slate-200);">이행관리 모듈</div>
+            <div class="side-title" style="font-size:11px; font-weight:800; color:var(--slate-500); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--slate-200);">이행관리 모듈</div>
+            <button type="button" class="menu-toggle" onclick="toggleMobileMenu()"><span id="mobileMenuLabel" style="font-weight:900;"></span><span class="menu-toggle-btn">☰ 메뉴</span></button>
             <div id="sidebarNavList"></div>
         </aside>
         <main class="content-area">
@@ -300,10 +327,22 @@
         function renderSiteManagerRows() { /* 서버 연결판에서는 사용하지 않음 */ }
         function addNewSite() { toggleSiteManager(); }
         function selectGlobalSite(id) { currentSiteId = id; renderGlobalSitePills(); renderActiveModule(); }
-        function switchModule(id) { if (!moduleAllowed(id)) return; runFlushHooks(); activeModule = id; renderSidebar(); renderActiveModule(); }
+        function switchModule(id) {
+            if (!moduleAllowed(id)) return;
+            runFlushHooks();
+            activeModule = id;
+            const side = document.querySelector('.sidebar');
+            if (side) side.classList.remove('open');                         // 휴대폰: 메뉴를 고르면 다시 접음
+            renderSidebar(); renderActiveModule();
+            if (window.innerWidth <= 920) window.scrollTo(0, 0);             // 휴대폰: 고른 화면의 맨 위부터 보이게
+        }
+        // 휴대폰에서 [☰ 메뉴] 버튼으로 메뉴를 펼치고 접음
+        function toggleMobileMenu() { const side = document.querySelector('.sidebar'); if (side) side.classList.toggle('open'); }
         function switchCompany(id) { try { localStorage.setItem('JINO_SAFETY_LAST_COMPANY', id); } catch (e) {} location.reload(); }
 
         function renderSidebar() {
+            const menuLabel = document.getElementById('mobileMenuLabel');
+            if (menuLabel) menuLabel.innerText = (modulesList.find(m => m.id === activeModule) || {}).title || '';
             document.getElementById('sidebarNavList').innerHTML = modulesList.filter(m => moduleAllowed(m.id)).map(m => {
                 const isLoaded = m.id === 0 || typeof window['renderModule' + m.id] === 'function';
                 const onServer = SERVER_MODULES.indexOf(m.id) >= 0;
@@ -696,12 +735,16 @@
             c.entry.rec[pk][idx].caption = value;
             rmSave(name, c.siteId, c.key);
         }
+        // 휴대폰·태블릿처럼 손으로 누르는 기기인가 (이런 기기에서만 [사진 촬영] 버튼을 보여 줌)
+        function isTouchDevice() { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); }
         function rmUploadBtn(name, pk, label, cls, locked) {
             if (locked) return '';
-            return `<label class="btn ${cls || 'btn-blue'} btn-sm" style="cursor:pointer;">${label}<input type="file" accept="image/*" multiple class="hidden" onchange="rmUpload('${name}', '${pk}', event)"></label>`;
+            const pick = `<label class="btn ${cls || 'btn-blue'} btn-sm" style="cursor:pointer;">${isTouchDevice() ? '📷 + 앨범에서 선택' : label}<input type="file" accept="image/*" multiple class="hidden" onchange="rmUpload('${name}', '${pk}', event)"></label>`;
+            if (!isTouchDevice()) return pick;
+            return `<span style="display:flex; gap:6px; flex-wrap:wrap;"><label class="btn btn-emerald btn-sm" style="cursor:pointer;">📸 사진 촬영<input type="file" accept="image/*" capture="environment" class="hidden" onchange="rmUpload('${name}', '${pk}', event)"></label>${pick}</span>`;
         }
         function rmPhotoGrid(name, pk, photos, locked) {
-            return `${locked ? '' : '<div style="border:2px dashed var(--slate-300); border-radius:8px; padding:8px; margin:6px 0 8px; text-align:center; font-size:12px; font-weight:700; color:var(--slate-500); background:#fff;">🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)</div>'}<div class="photo-grid">${photos.map((p, idx) => `
+            return `${locked ? '' : '<div style="border:2px dashed var(--slate-300); border-radius:8px; padding:8px; margin:6px 0 8px; text-align:center; font-size:12px; font-weight:700; color:var(--slate-500); background:#fff;">' + (isTouchDevice() ? '📸 [사진 촬영]으로 바로 찍거나, [앨범에서 선택]으로 찍어 둔 사진을 올립니다' : '🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)') + '</div>'}<div class="photo-grid">${photos.map((p, idx) => `
                 <div class="photo-card">
                     <img src="${photoUrl(p.path)}">
                     ${locked ? '' : `<div class="photo-actions"><button class="btn btn-red btn-sm" onclick="rmRemovePhoto('${name}', '${pk}', ${idx})">✕ 삭제</button></div>`}
