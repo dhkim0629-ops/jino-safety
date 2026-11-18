@@ -1230,7 +1230,24 @@ function tbmSave(siteId, date) {
 // 입력 내용은 화면에만 반영해 두고, [일지 저장] 버튼을 누르면 서버에 저장
 function tbmMarkDirty() { tbmDirty[getCurTbmSiteId() + '|' + tbmSelectedDate] = ++tbmDirtySeq; tbmRefreshSaveBar(); }
 function tbmSet(field, value) { const rec = tbmRec(); if (!rec) return; rec[field] = value; tbmMarkDirty(); }
-function tbmSetCheck(i, value) { const rec = tbmRec(); if (!rec) return; rec.checks[i] = !!value; tbmMarkDirty(); }
+function tbmSetCheck(i, value) { const rec = tbmRec(); if (!rec) return; rec.checks[i] = !!value; tbmMarkDirty(); tbmRefreshCheckCount(); }
+// 작업 전 확인사항 전체 체크 / 전체 해제
+function tbmSetAllChecks(value) {
+    const rec = tbmRec();
+    if (!rec) return;
+    rec.checks = rec.checks.map(() => !!value);
+    document.querySelectorAll('#tbmCheckTable input[type=checkbox]').forEach(el => { el.checked = !!value; });   // 다른 칸에 쓰던 내용이 지워지지 않도록 체크 칸만 바꿈
+    tbmMarkDirty();
+    tbmRefreshCheckCount();
+}
+function tbmRefreshCheckCount() {
+    const rec = tbmRec();
+    const el = document.getElementById('tbmCheckCount');
+    if (!rec || !el) return;
+    const n = rec.checks.filter(Boolean).length;
+    el.innerText = n + ' / ' + rec.checks.length + ' 확인';
+    el.style.color = n === rec.checks.length ? 'var(--emerald-700)' : 'var(--amber-600)';
+}
 
 // [일지 저장] 버튼
 async function tbmSaveNow() {
@@ -1541,8 +1558,14 @@ function renderModule3() {
                 </div>
             </div>
             <div class="section-box" style="border-left:4px solid var(--blue-600);">
-                <div class="section-title">작업 전 확인사항 (6대 필수 체크리스트)</div>
-                <table class="check-table">
+                <div class="section-title">
+                    <span>작업 전 확인사항 (6대 필수 체크리스트) <span id="tbmCheckCount" style="font-size:12px; margin-left:6px; color:${rec.checks.every(Boolean) ? 'var(--emerald-700)' : 'var(--amber-600)'};">${rec.checks.filter(Boolean).length} / ${rec.checks.length} 확인</span></span>
+                    <span style="display:flex; gap:6px;">
+                        <button class="btn btn-emerald btn-sm" onclick="tbmSetAllChecks(true)">☑ 전체 체크</button>
+                        <button class="btn btn-outline btn-sm" onclick="tbmSetAllChecks(false)">☐ 전체 해제</button>
+                    </span>
+                </div>
+                <table class="check-table" id="tbmCheckTable">
                     <tr>${chkCell(0)}${chkCell(1)}</tr>
                     <tr>${chkCell(2)}${chkCell(3)}</tr>
                     <tr>${chkCell(4)}${chkCell(5)}</tr>
