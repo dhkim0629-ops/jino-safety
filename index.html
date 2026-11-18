@@ -1312,11 +1312,51 @@ function tbmCompressImage(file) {
     });
 }
 
+// [사진 업로드] 버튼으로 고른 사진 올리기
 async function handleMod3PhotoUpload(event, siteId) {
-    const date = tbmSelectedDate;
     const files = Array.from(event.target.files || []);
     event.target.value = '';
+    await tbmUploadFiles(files, siteId);
+}
+
+// 사진을 끌어다 놓아 올리기 (사진 칸 위에 놓으면 올라감)
+function tbmIsFileDrag(event) { return !!(event.dataTransfer && Array.from(event.dataTransfer.types || []).indexOf('Files') >= 0); }
+function tbmDropHighlight(on) {
+    const zone = document.getElementById('tbmDropZone');
+    if (!zone) return;
+    zone.style.outline = on ? '3px dashed var(--blue-600)' : '';
+    zone.style.outlineOffset = on ? '-3px' : '';
+    zone.style.background = on ? 'var(--blue-50)' : '';
+}
+function tbmDragOver(event) {
+    if (!tbmIsFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    tbmDropHighlight(true);
+}
+function tbmDragLeave(event) {
+    const zone = document.getElementById('tbmDropZone');
+    if (zone && event.relatedTarget && zone.contains(event.relatedTarget)) return;   // 칸 안에서 움직이는 동안은 표시 유지
+    tbmDropHighlight(false);
+}
+function tbmDrop(event, siteId) {
+    if (!tbmIsFileDrag(event)) return;
+    event.preventDefault();
+    tbmDropHighlight(false);
+    const all = Array.from(event.dataTransfer.files || []);
+    const images = all.filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name));
+    if (!images.length) { alert('사진 파일만 올릴 수 있습니다.'); return; }
+    if (images.length < all.length) alert('사진이 아닌 파일 ' + (all.length - images.length) + '개는 제외하고 올립니다.');
+    tbmUploadFiles(images, siteId);
+}
+// 사진 칸 밖에 잘못 놓았을 때 브라우저가 사진 파일을 열어 프로그램 화면이 사라지는 것을 막음
+window.addEventListener('dragover', (e) => { if (tbmIsFileDrag(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (tbmIsFileDrag(e)) e.preventDefault(); });
+
+async function tbmUploadFiles(files, siteId) {
+    const date = tbmSelectedDate;
     if (!files.length) return;
+    if (!(tbmDataBySite[siteId] && tbmDataBySite[siteId].records[date])) return;   // 일지가 없는 날짜에는 올리지 않음
     tbmUploading += files.length;
     renderActiveModule();
     for (const file of files) {
@@ -1477,13 +1517,13 @@ function renderModule3() {
                 <div class="section-title">특이사항 및 공종별 전달사항</div>
                 <textarea class="form-textarea" onchange="tbmSet('note', this.value)">${tbmEsc(rec.note)}</textarea>
             </div>
-            <div class="section-box" style="border-left:4px solid var(--purple-600);">
+            <div id="tbmDropZone" class="section-box" style="border-left:4px solid var(--purple-600);" ondragover="tbmDragOver(event)" ondragleave="tbmDragLeave(event)" ondrop="tbmDrop(event, '${siteId}')">
                 <div class="section-title">
                     <span>📸 ${tbmDateLabel(tbmSelectedDate)} TBM 현장 실사진 (${tbmEsc(getSiteLabelById(siteId))})</span>
                     <label class="btn btn-blue btn-sm" style="cursor:pointer;">📷 + 당일 사진 업로드<input type="file" accept="image/*" multiple class="hidden" onchange="handleMod3PhotoUpload(event, '${siteId}')"></label>
                 </div>
                 ${tbmUploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 사진 ${tbmUploading}장 올리는 중…</div>` : ''}
-                ${rec.photos.length || tbmUploading > 0 ? '' : '<div style="font-size:12px; color:var(--slate-500);">아직 올린 사진이 없습니다.</div>'}
+                <div style="border:2px dashed var(--slate-300); border-radius:8px; padding:12px; margin-bottom:10px; text-align:center; font-size:12.5px; font-weight:700; color:var(--slate-500); background:#fff;">🖱️ 사진 파일을 이 칸으로 끌어다 놓으면 바로 올라갑니다 (여러 장 가능)${rec.photos.length || tbmUploading > 0 ? '' : '<div style="font-size:11.5px; font-weight:600; margin-top:3px;">아직 올린 사진이 없습니다.</div>'}</div>
                 <div class="photo-grid">
                     ${rec.photos.map((p, idx) => `
                         <div class="photo-card">
