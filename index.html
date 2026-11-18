@@ -96,7 +96,7 @@
                 <div class="brand-icon">⛑️</div>
                 <div>
                     <div class="brand-title"><span id="headerCompanyName"></span> 중처법 안전보건 통합관리 <span class="badge-jino">노무그룹 지노 표준 (서버 저장)</span></div>
-                    <div class="brand-sub">9대 핵심 모듈 통합 시스템 (본사·현장 서버 공유)</div>
+                    <div class="brand-sub">안전보건 이행관리 통합 시스템 (본사·현장 서버 공유)</div>
                 </div>
             </div>
             <div class="header-controls">
@@ -106,7 +106,7 @@
 
     <div class="main-container">
         <aside class="sidebar">
-            <div style="font-size:11px; font-weight:800; color:var(--slate-500); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--slate-200);">9대 이행관리 모듈</div>
+            <div style="font-size:11px; font-weight:800; color:var(--slate-500); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--slate-200);">이행관리 모듈</div>
             <div id="sidebarNavList"></div>
         </aside>
         <main class="content-area">
@@ -144,7 +144,7 @@
         const SUPABASE_URL = 'https://vsbddasoslqmcvoppvuj.supabase.co';
         const SUPABASE_KEY = 'sb_publishable__6dfg59E_kmUEO9nkLNA_Q_gxt1jidT';
         const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-        const SERVER_MODULES = [1, 2, 3, 4, 5, 6, 7, 8, 9];   // 서버에 연결된 모듈 번호 (전 모듈 연결됨)
+        const SERVER_MODULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];   // 서버에 연결된 모듈 번호 (전 모듈 연결됨)
 
         let activeModule = 0;
         let currentSiteId = 'hq';
@@ -161,7 +161,8 @@
             { id: 6, title: '6. 법령준수 점검표', tag: '22대항목·인쇄' },
             { id: 7, title: '7. 비상사태 대비훈련', tag: '반기훈련' },
             { id: 8, title: '8. 책임자등 반기평가', tag: '🔒 보안락 적용' },
-            { id: 9, title: '9. 안전보건 예산관리', tag: '집행내역·인쇄' }
+            { id: 9, title: '9. 안전보건 예산관리', tag: '집행내역·인쇄' },
+            { id: 10, title: '10. 서식 게시판', tag: '서식·매뉴얼' }
         ];
 
         let hqOrg = { companyName: '', ceoName: '', ceoDuty: '', safetyManager: '', advisorFirm: '' };
@@ -594,6 +595,7 @@
             if (c.entry.ok) return alert('본사 확인이 끝난 자료입니다. 확인을 취소한 뒤 삭제해 주세요.');
             if (!confirm('이 ' + (c.M.itemLabel || '기록') + '을(를) 삭제하시겠습니까?\n삭제하면 본사와 현장 모두에서 사라집니다.')) return;
             const M = c.M, siteId = c.siteId, key = c.key, sk = c.sk;
+            const gone = c.entry.rec;
             const paths = [];
             M.photoKeys.forEach(pk => c.entry.rec[pk].forEach(p => paths.push(p.path)));
             delete c.box.entries[key];
@@ -602,7 +604,7 @@
             const co = rmCoords(M, key);
             M.chain[sk] = (M.chain[sk] || Promise.resolve()).then(async () => {
                 const ok = await srvDeleteRecord(M.module, siteId, co.date, co.itemKey);
-                if (ok) await srvRemovePhotos(paths);
+                if (ok) { await srvRemovePhotos(paths); if (M.afterDelete) M.afterDelete(gone); }   // afterDelete: 모듈이 따로 보관한 파일 정리
             });
             renderActiveModule();
         }
@@ -796,7 +798,7 @@
                 <div class="card">
                     <div class="section-title">
                         <h2>${M.title}</h2>
-                        ${entry ? `<button class="btn btn-amber" onclick="rmPrint('${name}')">🖨️ ${M.printLabel || 'A4 프린트'}</button>` : ''}
+                        ${entry && !M.noPrint ? `<button class="btn btn-amber" onclick="rmPrint('${name}')">🖨️ ${M.printLabel || 'A4 프린트'}</button>` : ''}
                     </div>
                     <div class="section-box" style="border-left:4px solid var(--emerald-600); padding:12px;">
                         <div class="grid-2">
@@ -827,7 +829,7 @@
                     <div style="font-size:12px; font-weight:800; color:var(--slate-600); margin-bottom:6px;">총 ${keys.length}건 · 줄을 누르면 내용을 열어 보거나 고칠 수 있습니다.</div>
                     <div class="law-table-wrap">
                         <table class="law-table">
-                            <thead><tr><th style="width:105px;">일자</th><th>${M.listTitle || '내용'}</th><th style="width:130px;">${M.listStatusTitle || '상태'}</th><th style="width:60px;">사진</th>${M.approval ? '<th style="width:110px;">본사 확인</th>' : ''}</tr></thead>
+                            <thead><tr><th style="width:105px;">일자</th><th>${M.listTitle || '내용'}</th><th style="width:130px;">${M.listStatusTitle || '상태'}</th><th style="width:60px;">${M.listCountTitle || '사진'}</th>${M.approval ? '<th style="width:110px;">본사 확인</th>' : ''}</tr></thead>
                             <tbody>
                                 ${keys.map(k => {
                                     const e = box.entries[k];
@@ -837,7 +839,7 @@
                                         <td style="text-align:center; font-weight:800;">${esc(col.date)}</td>
                                         <td><b>${esc(col.text) || '<span style="color:var(--slate-400);">(내용 없음)</span>'}</b>${col.sub ? `<div style="font-size:11.5px; color:var(--slate-500); margin-top:2px;">${esc(col.sub)}</div>` : ''}</td>
                                         <td style="text-align:center; font-weight:800; color:${col.statusColor || 'var(--slate-700)'};">${esc(col.status)}</td>
-                                        <td style="text-align:center;">📷 ${nPhotos}</td>
+                                        <td style="text-align:center;">${M.listCount ? M.listCount(e.rec) : '📷 ' + nPhotos}</td>
                                         ${M.approval ? `<td style="text-align:center; font-weight:800; color:${e.ok ? 'var(--emerald-700)' : 'var(--amber-600)'};">${e.ok ? '✅ 확인 완료' : '확인 전'}</td>` : ''}
                                     </tr>`;
                                 }).join('')}
@@ -852,7 +854,7 @@
             const editable = !locked;
             return head + `
                     ${M.approval ? rmApprovalBox(name, M, entry) : ''}
-                    ${ro && !M.approval ? '<div style="background:var(--slate-100); border:1px solid var(--slate-300); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">👁️ 본사에서 작성한 자료입니다. 현장 계정은 열람과 인쇄만 할 수 있습니다.</div>' : ''}
+                    ${ro && !M.approval ? `<div style="background:var(--slate-100); border:1px solid var(--slate-300); border-radius:8px; padding:8px 12px; font-size:12px; font-weight:700; margin-bottom:14px;">👁️ 본사에서 작성한 자료입니다. 현장 계정은 ${M.noPrint ? '열람과 내려받기' : '열람과 인쇄'}만 할 수 있습니다.</div>` : ''}
                     ${M.formHtml(entry.rec, { name: name, dis: dis, locked: locked, siteId: siteId, siteLabel: scopeLabel, siteObj: sitesData.find(s => s.id === siteId) || {}, uploading: M.uploading })}
                     ${editable ? `<div style="text-align:right; margin-bottom:10px;"><button class="btn btn-outline btn-sm" style="color:var(--red-700);" onclick="rmDelete('${name}')">🗑️ 이 ${M.itemLabel || '기록'} 삭제</button></div>
                     <div id="${name}SaveBar" style="position:sticky; bottom:0; z-index:5; background:#fff; border:2px solid var(--emerald-600); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; box-shadow:0 -2px 10px rgba(0,0,0,0.08);">${rmBarInner(M, sk)}</div>` : ''}
@@ -2365,6 +2367,108 @@ makeRecordModule({
     }
 });
 function renderModule9() { return rmRender('bud'); }
+        // ====== [여기에 모듈 10 붙여넣기] ======
+// 서식 게시판 (서버 저장판) — 회사 공통.  본사·지노 계정이 서식 파일을 올리고, 현장 계정은 열람·내려받기만
+// 서버 기록 한 건 = 게시글 한 건.  data = { date, title, category, desc, files:[{ path, name, size }] }
+// 파일은 사진 보관함과 별도인 '서식 보관함'(forms)에 저장 (문서 파일 허용, 1개 20MB 이하)
+const FORMS_EXT = ['pdf', 'hwp', 'hwpx', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip', 'txt', 'jpg', 'jpeg', 'png'];
+const FORMS_MAX_BYTES = 20 * 1024 * 1024;
+const FORMS_CATEGORIES = ['매뉴얼', '법정서식', '점검표', '교육자료', '기타'];
+let formsUploading = 0;
+
+function formsSizeLabel(n) { n = Number(n) || 0; return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+function formsNormFiles(a) { return (Array.isArray(a) ? a : []).filter(f => f && f.path).map(f => ({ path: f.path, name: f.name || '파일', size: Number(f.size) || 0 })); }
+
+async function formsUpload(event) {
+    const c = rmCur('forms');
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length || c.fixed) return;
+    const bad = files.filter(f => FORMS_EXT.indexOf((f.name.split('.').pop() || '').toLowerCase()) < 0);
+    if (bad.length) return alert('올릴 수 없는 파일 형식입니다: ' + bad.map(f => f.name).join(', ') + '\n\n올릴 수 있는 형식: ' + FORMS_EXT.join(', '));
+    const big = files.filter(f => f.size > FORMS_MAX_BYTES);
+    if (big.length) return alert('파일 1개는 20MB 이하만 올릴 수 있습니다: ' + big.map(f => f.name).join(', '));
+    const siteId = c.siteId, key = c.key;
+    formsUploading += files.length;
+    renderActiveModule();
+    for (const file of files) {
+        try {
+            const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+            const path = [currentCompanyId, 'hq', 'forms', srvRandomId() + '.' + ext].join('/');   // 보관 이름은 임의 값, 원래 파일 이름은 기록에 따로 저장
+            setSaveStatus('saving', '… 파일 올리는 중');
+            const res = await sb.storage.from('forms').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+            if (res.error) { srvFail('파일 올리기', res.error); }
+            else {
+                const e = rmEntryAt(recMods.forms, siteId, key);
+                if (e) { e.rec.files.push({ path: path, name: file.name, size: file.size }); await rmSave('forms', siteId, key); }
+                else { await sb.storage.from('forms').remove([path]); }   // 그 사이 게시글이 삭제된 경우 올린 파일 정리
+            }
+        } catch (err) { srvFail('파일 올리기', err); }
+        formsUploading -= 1;
+        if (activeModule === 10) renderActiveModule();
+    }
+}
+
+// 내려받기: 잠깐만 유효한 주소를 받아 원래 파일 이름으로 내려받음
+async function formsDownload(idx) {
+    const c = rmCur('forms');
+    const f = c.entry && c.entry.rec.files[idx];
+    if (!f) return;
+    const res = await sb.storage.from('forms').createSignedUrl(f.path, 120, { download: f.name });
+    if (res.error || !res.data || !res.data.signedUrl) return alert('파일을 내려받지 못했습니다.\n' + ((res.error && res.error.message) || '') + '\n\n잠시 뒤 다시 시도해 주세요.');
+    const a = document.createElement('a');
+    a.href = res.data.signedUrl; a.download = f.name; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+}
+
+function formsRemoveFile(idx) {
+    const c = rmCur('forms');
+    if (c.fixed || !c.entry.rec.files[idx]) return;
+    if (!confirm('"' + c.entry.rec.files[idx].name + '" 파일을 삭제하시겠습니까?')) return;
+    const path = c.entry.rec.files[idx].path;
+    c.entry.rec.files.splice(idx, 1);
+    rmSave('forms', c.siteId, c.key).then(() => sb.storage.from('forms').remove([path]));
+    renderActiveModule();
+}
+
+makeRecordModule({
+    id: 10, name: 'forms', module: 'forms', mode: 'list', scope: 'company', approval: false, managerOnly: true, photoKeys: [], noPrint: true,
+    title: '📁 10. 서식 게시판 (매뉴얼·법정서식 내려받기)',
+    itemLabel: '게시글', newLabel: '+ 새 서식 올리기', saveLabel: '게시글 저장',
+    listTitle: '제목', listStatusTitle: '분류', listCountTitle: '파일', listCount: (r) => '📎 ' + r.files.length,
+    blank: () => ({ date: todayStr(), title: '', category: '', desc: '', files: [] }),
+    normalize: (d) => ({ date: d.date || '', title: d.title || '', category: d.category || '', desc: d.desc || '', files: formsNormFiles(d.files) }),
+    listCols: (r) => ({ date: r.date, text: r.title, sub: r.desc.split('\n')[0].slice(0, 70), status: r.category, statusColor: 'var(--blue-700)' }),
+    afterDelete: (rec) => { const paths = rec.files.map(f => f.path); if (paths.length) sb.storage.from('forms').remove(paths); },
+    formHtml: (r, c) => `
+        <datalist id="formsCatList">${FORMS_CATEGORIES.map(v => `<option value="${v}"></option>`).join('')}</datalist>
+        <div class="section-box" style="border-left:4px solid var(--emerald-600);">
+            <div class="grid-3" style="margin-bottom:10px;">
+                ${rmInput(c.name, r, 'title', '제목', c.dis, 'text', '예: 중대재해 발생 시 대응 매뉴얼')}
+                <div><div class="form-label">분류</div><input type="text" class="form-input" list="formsCatList" placeholder="예: 매뉴얼" value="${esc(r.category)}" ${c.dis} onchange="rmSet('${c.name}', 'category', this.value)"></div>
+                ${rmInput(c.name, r, 'date', '게시일', c.dis, 'date')}
+            </div>
+            ${rmTextarea(c.name, r, 'desc', '설명 (언제, 어떻게 쓰는 서식인지)', c.dis, '예: 사고 발생 즉시 현장소장이 작성하여 본사에 제출')}
+        </div>
+        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+            <div class="section-title">
+                <span>📎 첨부 파일 (${r.files.length}개)</span>
+                ${c.locked ? '' : `<label class="btn btn-blue btn-sm" style="cursor:pointer;">📎 + 파일 올리기<input type="file" multiple class="hidden" accept="${FORMS_EXT.map(e => '.' + e).join(',')}" onchange="formsUpload(event)"></label>`}
+            </div>
+            ${formsUploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 파일 ${formsUploading}개 올리는 중…</div>` : ''}
+            ${r.files.length || formsUploading > 0 ? '' : `<div style="font-size:12px; color:var(--slate-500);">아직 올린 파일이 없습니다.${c.locked ? '' : ' PDF, 한글(hwp), 워드, 엑셀, 파워포인트, 압축 파일을 올릴 수 있습니다 (1개 20MB 이하).'}</div>`}
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                ${r.files.map((f, idx) => `
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; border:1px solid var(--slate-200); border-radius:8px; padding:8px 10px;">
+                        <span style="flex:1; min-width:160px; font-weight:800; font-size:13px; word-break:break-all;">📄 ${esc(f.name)} <span style="font-weight:600; font-size:11px; color:var(--slate-500);">(${formsSizeLabel(f.size)})</span></span>
+                        <button class="btn btn-emerald btn-sm" onclick="formsDownload(${idx})">⬇ 내려받기</button>
+                        ${c.locked ? '' : `<button class="btn btn-red btn-sm" onclick="formsRemoveFile(${idx})">삭제</button>`}
+                    </div>`).join('')}
+            </div>
+        </div>`,
+    printHtml: () => ''
+});
+function renderModule10() { return rmRender('forms'); }
    // ====== [로그인 · 권한 — 서버 연결판] ======
         const ROLE_LABELS = {
             jino_admin: '👑 지노 관리자',
