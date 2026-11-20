@@ -111,6 +111,19 @@
             .site-pill { padding: 8px 11px; font-size: 13px; }
             /* 입력 칸 글자가 16px보다 작으면 아이폰이 화면을 자동 확대하므로 16px로 맞춤 */
             .form-input, .form-select, .form-textarea, .photo-caption-input { font-size: 16px; }
+            /* 6번 점검표: 넓은 표 대신 항목마다 카드 한 장으로 세로로 쌓음 */
+            .law-cards-wrap { overflow-x: visible; border: 0; background: transparent; }
+            .law-table.law-cards { min-width: 0; display: block; }
+            .law-cards thead { display: none; }
+            .law-cards tbody { display: block; }
+            .law-cards tr { display: block; background: #fff; border: 1px solid var(--slate-300); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+            .law-cards td { display: block; border: 0; padding: 3px 0; text-align: left !important; font-size: 13.5px; }
+            .law-cards td:nth-child(1), .law-cards td:nth-child(2) { display: inline-block; margin-right: 6px; }
+            .law-cards td:nth-child(1)::before { content: 'No. '; color: var(--slate-500); font-weight: 700; }
+            .law-cards td[data-label] { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+            .law-cards td[data-label]::before { content: attr(data-label); flex: 0 0 76px; font-size: 12px; font-weight: 800; color: var(--slate-600); }
+            .law-cards td[data-label] > .form-select, .law-cards td[data-label] > .form-input { flex: 1 1 150px; width: auto; min-width: 0; }
+            .law-cards td.lc-skip { display: none; }
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -179,7 +192,7 @@
         let companiesList = [];       // 접근 가능한 회사 목록
         let currentCompanyId = null;
         const modulesList = [
-            { id: 0, title: '통합 대시보드', tag: '조립상태확인' },
+            { id: 0, title: '통합 대시보드', tag: '현황' },
             { id: 1, title: '1. 경영방침·목표', tag: '게시·사진·인쇄' },
             { id: 2, title: '2. 관리체계·조직도', tag: '담당자·업무수정' },
             { id: 3, title: '3. 일일 TBM 일지', tag: '현장별·사진·인쇄' },
@@ -239,6 +252,10 @@
             alert(what + '에 실패했습니다.\n' + ((error && error.message) || error || '') + '\n\n인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
         }
 
+        // 동시 수정 확인용: 기록마다 '내가 마지막으로 본 서버 저장 시각'을 적어 둠
+        const srvSeen = {}, srvBusy = {};
+        function srvKey(module, siteId, date, itemKey) { return [module, siteId || '', date || '', itemKey || ''].join('|'); }
+
         // 기록 불러오기: 모듈·현장·기간으로 조회
         // companyOnly 가 true 이면 현장 구분 없는 회사 공통 기록만 불러옴
         async function srvLoadRecords(module, siteId, fromDate, toDate, companyOnly) {
@@ -249,6 +266,7 @@
             if (toDate) q = q.lte('record_date', toDate);
             const res = await q.order('record_date');
             if (res.error) throw res.error;
+            (res.data || []).forEach(r => { srvSeen[srvKey(module, r.site_id, r.record_date, r.item_key)] = Date.parse(r.updated_at) || 0; });
             return res.data || [];
         }
 
@@ -256,10 +274,34 @@
         // itemKey는 한 현장에 여러 건을 쌓는 모듈(의견청취·개선사례 등)에서 건을 구분하는 번호. 그 외에는 비워 둠
         async function srvSaveRecord(module, siteId, date, data, itemKey) {
             setSaveStatus('saving');
-            const res = await sb.from('records').upsert(
-                { company_id: currentCompanyId, site_id: siteId || null, module: module, record_date: date || null, item_key: itemKey || '', data: data },
-                { onConflict: 'company_id,site_id,module,record_date,item_key' });
+            const k = srvKey(module, siteId, date, itemKey);
+            // 동시 수정 확인: 내가 불러온 뒤에 다른 사람이 같은 기록을 저장했으면 덮어쓰기 전에 물어봄
+            // (본사 확인 기록·직인은 제외, 내 저장이 진행 중일 때는 건너뜀)
+            if (!/_ok$/.test(module) && module !== 'seal' && !srvBusy[k]) {
+                try {
+                    let cq = sb.from('records').select('updated_at').eq('company_id', currentCompanyId).eq('module', module).eq('item_key', itemKey || '');
+                    cq = siteId ? cq.eq('site_id', siteId) : cq.is('site_id', null);
+                    cq = date ? cq.eq('record_date', date) : cq.is('record_date', null);
+                    const cur = await cq.maybeSingle();
+                    const t = cur && cur.data && cur.data.updated_at ? Date.parse(cur.data.updated_at) : 0;
+                    if (t && (!srvSeen[k] || t > srvSeen[k]) && !srvBusy[k]) {
+                        const when = new Date(t); const hm = String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
+                        if (!confirm('⚠ 이 기록은 내가 불러온 뒤에 다른 사람이 수정했습니다. (' + (when.getMonth() + 1) + '월 ' + when.getDate() + '일 ' + hm + ' 저장)\n\n[확인] 내 내용으로 덮어씁니다. 상대가 입력한 내용은 사라집니다.\n[취소] 저장하지 않습니다. [새로고침]으로 상대 내용을 먼저 확인해 주세요.')) {
+                            setSaveStatus('error', '⚠ 저장 보류 (다른 사람이 수정함)');
+                            return false;
+                        }
+                    }
+                } catch (e) { console.warn('동시 수정 확인 실패:', e); }
+            }
+            srvBusy[k] = (srvBusy[k] || 0) + 1;
+            let res;
+            try {
+                res = await sb.from('records').upsert(
+                    { company_id: currentCompanyId, site_id: siteId || null, module: module, record_date: date || null, item_key: itemKey || '', data: data },
+                    { onConflict: 'company_id,site_id,module,record_date,item_key' }).select('updated_at').maybeSingle();
+            } finally { srvBusy[k] -= 1; }
             if (res.error) { srvFail('저장', res.error); return false; }
+            srvSeen[k] = (res.data && Date.parse(res.data.updated_at)) || Date.now();
             setSaveStatus('saved');
             return true;
         }
@@ -271,6 +313,7 @@
             q = date ? q.eq('record_date', date) : q.is('record_date', null);
             const res = await q;
             if (res.error) { srvFail('삭제', res.error); return false; }
+            delete srvSeen[srvKey(module, siteId, date, itemKey)];
             setSaveStatus('saved');
             return true;
         }
@@ -310,6 +353,22 @@
             (res.data || []).forEach(d => { if (d && d.signedUrl && d.path) photoUrlCache[d.path] = { url: d.signedUrl, t: now }; });
         }
         function photoUrl(path) { return photoUrlCache[path] ? photoUrlCache[path].url : PHOTO_PLACEHOLDER; }
+
+        // 버튼을 누르는 도중에는 화면 다시 그리기를 잠깐 미룸.
+        // (칸에 글을 쓰고 곧바로 [저장]을 누르면, 칸을 벗어나는 순간 화면이 다시 그려지면서 누른 버튼이 사라져 첫 번째 누름이 먹히지 않던 문제를 막음)
+        let uiPressing = false, uiPressTimer = null;
+        const uiDeferred = {};
+        function uiFlush() {
+            uiPressing = false; clearTimeout(uiPressTimer);
+            const fs = Object.keys(uiDeferred).map(k => uiDeferred[k]);
+            Object.keys(uiDeferred).forEach(k => delete uiDeferred[k]);
+            fs.forEach(f => { try { f(); } catch (e) { console.warn(e); } });
+        }
+        ['pointerdown', 'mousedown'].forEach(ev => window.addEventListener(ev, () => { uiPressing = true; clearTimeout(uiPressTimer); uiPressTimer = setTimeout(uiFlush, 1500); }, true));
+        ['pointerup', 'mouseup', 'pointercancel'].forEach(ev => window.addEventListener(ev, () => { uiPressing = false; setTimeout(uiFlush, 0); }, true));
+        window.addEventListener('blur', uiFlush);
+        // 누르는 도중이면 fn 실행을 뒤로 미루고 true를 돌려줌
+        function uiLater(key, fn) { if (!uiPressing) return false; uiDeferred[key] = fn; return true; }
 
         // 서버 연결 모듈이 '저장하지 않은 내용 저장' 함수를 등록해 두면, 메뉴를 옮길 때 모두 실행
         const flushHooks = [];
@@ -363,21 +422,8 @@
             document.getElementById('globalSitePills').innerHTML = h;
         }
 
-        function renderActiveModule() {
-            const v = document.getElementById('moduleViewContainer');
-            if (!appUser) { v.innerHTML = ''; return; }
-            if (!sitesData.length) {
-                v.innerHTML = `<div class="card"><div class="section-title"><h2 style="font-size:16px;">등록된 현장이 없습니다</h2></div><p style="color:var(--slate-600);">노무그룹 지노에 현장 등록을 요청해 주세요.</p></div>`;
-                return;
-            }
-            if (!moduleAllowed(activeModule)) activeModule = 0;
-            if (activeModule === 0) {
-                v.innerHTML = `<div class="card">
-                    <div class="section-title">
-                        <h2 style="font-size:18px; font-weight:900;">📊 통합 대시보드 — ${hqOrg.companyName}</h2>
-                    </div>
-                    <p style="font-size:12.5px; color:var(--slate-600); margin-bottom:14px;">모든 모듈의 자료는 서버에 저장되어 본사와 현장이 같은 내용을 봅니다. 각 화면의 <b>[저장]</b> 버튼을 누르면 서버에 반영되고, 다른 사람이 입력한 내용은 <b>[🔄 새로고침]</b>으로 확인합니다.</p>
-                    <div class="grid-3">
+        function dashModuleGrid() {
+            return `<div class="grid-3">
                         ${modulesList.slice(1).filter(m => moduleAllowed(m.id)).map(m => {
                             const ok = typeof window['renderModule' + m.id] === 'function';
                             const onServer = SERVER_MODULES.indexOf(m.id) >= 0;
@@ -386,8 +432,21 @@
                                 <div style="margin-top:6px; font-size:11.5px; font-weight:800; color:${onServer ? 'var(--blue-700)' : (ok ? 'var(--slate-500)' : 'var(--red-600)')};">${!ok ? '⏳ 미조립' : (onServer ? '☁ 서버 저장 (본사·현장 공유)' : '💻 이 PC 임시 저장 (연결 예정)')}</div>
                             </div>`;
                         }).join('')}
-                    </div>
-                </div>`;
+                    </div>`;
+        }
+
+        function renderActiveModule() {
+            if (uiLater('render', renderActiveModule)) return;
+            const v = document.getElementById('moduleViewContainer');
+            if (!appUser) { v.innerHTML = ''; return; }
+            if (!sitesData.length) {
+                v.innerHTML = `<div class="card"><div class="section-title"><h2 style="font-size:16px;">등록된 현장이 없습니다</h2></div><p style="color:var(--slate-600);">노무그룹 지노에 현장 등록을 요청해 주세요.</p></div>`;
+                return;
+            }
+            if (!moduleAllowed(activeModule)) activeModule = 0;
+            if (activeModule === 0) {
+                v.innerHTML = dashHtml();
+                dashLoad();
                 return;
             }
             const renderFn = window['renderModule' + activeModule];
@@ -612,6 +671,7 @@
                 <button id="${M.name}SaveBtn" class="btn ${dirty ? 'btn-emerald' : 'btn-outline'}" style="padding:10px 22px; font-size:14px;" onclick="rmSaveNow('${M.name}')">💾 ${M.saveLabel || '저장'}</button>`;
         }
         function rmRefreshBar(name) {
+            if (uiLater('rmBar_' + name, () => rmRefreshBar(name))) return;
             const bar = document.getElementById(name + 'SaveBar');
             if (!bar || !sitesData.length) return;
             const c = rmCur(name);
@@ -774,7 +834,7 @@
             const inp = document.getElementById(name + 'Confirmer');
             const who = ((inp && inp.value) || '').trim();
             if (!who) { alert('확인자 이름을 입력해 주세요.'); if (inp) inp.focus(); return; }
-            const warn = c.M.confirmWarn ? c.M.confirmWarn(c.entry.rec) : [];
+            const warn = c.M.confirmWarn ? c.M.confirmWarn(c.entry.rec, sitesData.find(s => s.id === c.siteId) || {}) : [];
             if (!confirm((warn.length ? '⚠ ' + warn.join(', ') + '\n\n' : '') + '본사 최종 확인으로 저장하시겠습니까?\n확인 후에는 현장에서 수정할 수 없습니다.')) return;
             const saved = await rmSave(name, c.siteId, c.key);   // 화면의 내용을 먼저 저장한 뒤 확인 기록을 남김
             if (!saved) return;
@@ -937,6 +997,220 @@
                     ${editable ? `<div style="text-align:right; margin-bottom:10px;"><button class="btn btn-outline btn-sm" style="color:var(--red-700);" onclick="rmDelete('${name}')">🗑️ 이 ${M.itemLabel || '기록'} 삭제</button></div>
                     <div id="${name}SaveBar" style="position:sticky; bottom:0; z-index:5; background:#fff; border:2px solid var(--emerald-600); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; box-shadow:0 -2px 10px rgba(0,0,0,0.08);">${rmBarInner(M, sk)}</div>` : ''}
                 </div>`;
+        }
+
+
+        // ====== [대시보드 현황] ======
+        // 현장별로 이번 달 TBM 작성 일수, 이번 반기 점검표·훈련·평가 작성 여부, 본사 확인 대기 건수를 보여 줌
+        let dashData = null, dashSeq = 0;
+        function dashHtml() {
+            return `<div class="card">
+                <div class="section-title" style="flex-wrap:wrap; gap:8px;">
+                    <h2 style="font-size:18px; font-weight:900;">📊 통합 대시보드 — ${esc(hqOrg.companyName)}</h2>
+                    <span style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="btn btn-outline btn-sm" onclick="dashLoad()">🔄 새로고침</button>
+                        ${isSiteBoss() ? '' : '<button class="btn btn-outline btn-sm" onclick="backupOpen()">💾 자료 백업</button>'}
+                    </span>
+                </div>
+                <div id="dashStatus"><div style="padding:18px; text-align:center; color:var(--slate-500); font-weight:700;">현황을 불러오는 중입니다…</div></div>
+                <div style="font-size:12.5px; font-weight:800; color:var(--slate-600); margin:16px 0 8px;">모듈 바로가기</div>
+                ${dashModuleGrid()}
+            </div>`;
+        }
+        async function dashLoad() {
+            const seq = ++dashSeq;
+            const now = new Date(), y = now.getFullYear(), mm = String(now.getMonth() + 1).padStart(2, '0');
+            const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+            const hDate = halfDate(halfCurrent()), yDate = y + '-01-01';
+            try {
+                const base = () => sb.from('records').select('site_id, module, record_date, item_key').eq('company_id', currentCompanyId);
+                const [tbm, per, haz] = await Promise.all([
+                    base().eq('module', 'tbm').gte('record_date', y + '-' + mm + '-01').lte('record_date', y + '-' + mm + '-' + String(lastDay).padStart(2, '0')),
+                    base().in('module', ['checklist', 'checklist_ok', 'drill', 'drill_ok', 'eval_staff', 'eval_staff_ok', 'eval_boss', 'eval_boss_ok', 'policy', 'budget', 'budget_ok']).in('record_date', [hDate, yDate]),
+                    base().in('module', ['hazard', 'hazard_ok']).is('record_date', null)
+                ]);
+                if (seq !== dashSeq) return;
+                const err = tbm.error || per.error || haz.error; if (err) throw err;
+                dashData = { tbm: tbm.data || [], per: per.data || [], haz: haz.data || [], hDate: hDate, yDate: yDate, month: now.getMonth() + 1 };
+            } catch (e) { console.warn('현황 불러오기 실패:', e); dashData = { error: true }; }
+            dashPaint();
+        }
+        function dashGo(moduleId, siteId) { if (siteId) currentSiteId = siteId; renderGlobalSitePills(); switchModule(moduleId); }
+        function dashBadge(text, kind, moduleId, siteId) {
+            const col = { ok: ['#ecfdf5', '#047857', '#34d399'], wait: ['#fffbeb', '#b45309', '#f59e0b'], no: ['#fef2f2', '#b91c1c', '#fca5a5'], info: ['#eff6ff', '#1d4ed8', '#93c5fd'] }[kind];
+            return `<button type="button" onclick="dashGo(${moduleId}, '${siteId || ''}')" style="font-family:inherit; cursor:pointer; background:${col[0]}; color:${col[1]}; border:1px solid ${col[2]}; border-radius:6px; padding:4px 9px; font-size:12px; font-weight:800; white-space:nowrap;">${text}</button>`;
+        }
+        // 반기·연도 단위 기록의 상태: 미작성 / 작성(본사 확인 대기) / 확인 완료
+        function dashState(rows, module, siteId, date, hasApproval) {
+            const hit = (m) => rows.some(r => r.module === m && (r.site_id || '') === (siteId || '') && r.record_date === date);
+            if (!hit(module)) return ['미작성', 'no'];
+            if (!hasApproval) return ['작성됨', 'ok'];
+            return hit(module + '_ok') ? ['확인 완료', 'ok'] : ['확인 대기', 'wait'];
+        }
+        function dashPaint() {
+            const box = document.getElementById('dashStatus');
+            if (!box || !dashData) return;
+            if (dashData.error) { box.innerHTML = '<div style="padding:14px; color:var(--red-700); font-weight:700;">현황을 불러오지 못했습니다. [🔄 새로고침]을 눌러 주세요.</div>'; return; }
+            const d = dashData, today = todayStr();
+            const row = (label, html) => `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:5px 0; border-top:1px dashed var(--slate-200);"><span style="font-size:12.5px; font-weight:700; color:var(--slate-600);">${label}</span><span style="display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end;">${html}</span></div>`;
+            const st = (module, sid, date, appr, mid) => { const s = dashState(d.per, module, sid, date, appr); return dashBadge(s[0], s[1], mid, sid); };
+            let waitTotal = 0;
+            const cards = sitesData.map(s => {
+                const days = new Set(d.tbm.filter(r => r.site_id === s.id).map(r => r.record_date));
+                const hz = d.haz.filter(r => r.site_id === s.id && r.module === 'hazard');
+                const hzOk = new Set(d.haz.filter(r => r.site_id === s.id && r.module === 'hazard_ok').map(r => r.item_key));
+                const hzWait = hz.filter(r => !hzOk.has(r.item_key)).length;
+                waitTotal += hzWait + ['checklist', 'drill', 'eval_staff'].filter(m => dashState(d.per, m, s.id, d.hDate, true)[1] === 'wait').length;
+                return `<div style="border:1px solid var(--slate-300); border-radius:10px; padding:12px; background:#fff;">
+                    <div style="font-weight:900; font-size:14px; margin-bottom:6px;">🏗️ ${esc(s.name)} <span style="font-weight:700; font-size:12px; color:var(--slate-500);">${esc(s.boss)}</span></div>
+                    ${row('3. TBM 일지 (' + d.month + '월)', dashBadge(days.size + '일 작성', 'info', 3, s.id) + dashBadge(days.has(today) ? '오늘 작성' : '오늘 미작성', days.has(today) ? 'ok' : 'no', 3, s.id))}
+                    ${row('5. 위험요인 개선', dashBadge('전체 ' + hz.length + '건', 'info', 5, s.id) + (hzWait ? dashBadge('확인 대기 ' + hzWait + '건', 'wait', 5, s.id) : ''))}
+                    ${row('6. 법령준수 점검표', st('checklist', s.id, d.hDate, true, 6))}
+                    ${row('7. 비상사태 대비훈련', st('drill', s.id, d.hDate, true, 7))}
+                    ${row('8. 관리자 평가', st('eval_staff', s.id, d.hDate, true, 8))}
+                    ${isSiteBoss() ? '' : row('8. 현장소장 평가', st('eval_boss', s.id, d.hDate, true, 8))}
+                </div>`;
+            }).join('');
+            const company = `<div style="border:1px solid var(--slate-300); border-radius:10px; padding:12px; background:var(--slate-50);">
+                    <div style="font-weight:900; font-size:14px; margin-bottom:6px;">🏛️ 본사 (올해)</div>
+                    ${row('1. 경영방침·목표', st('policy', '', d.yDate, false, 1))}
+                    ${isSiteBoss() ? '' : row('9. 안전보건 예산', st('budget', '', d.yDate, true, 9))}
+                </div>`;
+            box.innerHTML = `
+                <div style="font-size:12.5px; color:var(--slate-600); margin-bottom:10px;">기준: <b>${halfLabel(halfCurrent())}</b> · 오늘 ${today}. 색 표시를 누르면 해당 화면으로 이동합니다. ${!isSiteBoss() && waitTotal ? `<b style="color:#b45309;">현장이 올린 기록 중 본사 확인 대기 ${waitTotal}건</b>` : ''}</div>
+                <div class="grid-3">${cards}${company}</div>
+                <div style="font-size:11.5px; color:var(--slate-500); margin-top:8px;">🟥 미작성 · 🟧 작성 후 본사 확인 대기 · 🟩 완료</div>`;
+        }
+
+        // ====== [비밀번호 변경] ======
+        function pwOpen() {
+            document.body.insertAdjacentHTML('beforeend', `<div id="pwModal" style="position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:9000; display:flex; align-items:center; justify-content:center; padding:16px;">
+                <div style="background:#fff; width:100%; max-width:400px; border-radius:14px; padding:22px; border-top:6px solid var(--emerald-600);">
+                    <div style="font-size:16px; font-weight:900; margin-bottom:6px;">🔑 비밀번호 변경</div>
+                    <p style="font-size:12.5px; color:var(--slate-600); line-height:1.5; margin-bottom:12px;">이 계정을 함께 쓰는 분이 있으면, 바꾼 뒤 새 비밀번호를 꼭 알려 주세요.</p>
+                    <input type="password" id="pwCur" class="form-input" placeholder="현재 비밀번호" autocomplete="current-password" style="margin-bottom:8px;">
+                    <input type="password" id="pwNew" class="form-input" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password" style="margin-bottom:8px;">
+                    <input type="password" id="pwNew2" class="form-input" placeholder="새 비밀번호 다시 입력" autocomplete="new-password" style="margin-bottom:8px;">
+                    <div id="pwMsg" style="min-height:18px; font-size:12.5px; font-weight:700; color:var(--red-700); margin-bottom:8px;"></div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="btn btn-outline" onclick="pwClose()">닫기</button>
+                        <button class="btn btn-emerald" id="pwBtn" onclick="pwSubmit()">변경</button>
+                    </div>
+                </div></div>`);
+            document.getElementById('pwCur').focus();
+        }
+        function pwClose() { const m = document.getElementById('pwModal'); if (m) m.remove(); }
+        async function pwSubmit() {
+            const cur = document.getElementById('pwCur').value, n1 = document.getElementById('pwNew').value, n2 = document.getElementById('pwNew2').value;
+            const msg = (t) => { document.getElementById('pwMsg').innerText = t; };
+            if (!cur || !n1 || !n2) return msg('세 칸을 모두 입력해 주세요.');
+            if (n1.length < 8) return msg('새 비밀번호는 8자 이상이어야 합니다.');
+            if (n1 !== n2) return msg('새 비밀번호 두 칸이 서로 다릅니다.');
+            if (n1 === cur) return msg('현재 비밀번호와 다른 것으로 정해 주세요.');
+            const btn = document.getElementById('pwBtn'); btn.disabled = true; msg('');
+            try {
+                const u = await sb.auth.getUser();
+                const email = u.data && u.data.user && u.data.user.email;
+                if (!email) throw new Error('로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.');
+                const chk = await sb.auth.signInWithPassword({ email: email, password: cur });   // 현재 비밀번호가 맞는지 먼저 확인
+                if (chk.error) { btn.disabled = false; return msg('현재 비밀번호가 맞지 않습니다.'); }
+                const res = await sb.auth.updateUser({ password: n1 });
+                if (res.error) throw res.error;
+                pwClose();
+                alert('비밀번호를 바꿨습니다.\n다음 로그인부터 새 비밀번호를 사용합니다.');
+            } catch (e) { btn.disabled = false; msg('변경하지 못했습니다: ' + ((e && e.message) || e)); }
+        }
+
+        // ====== [자료 백업] ======
+        // 본사·지노 계정이 기록(JSON·목록 CSV)과 사진·서식 파일을 ZIP 한 개로 내려받음
+        const BACKUP_MODULE_NAMES = { policy: '1_경영방침', tbm: '3_TBM일지', feedback: '4_의견청취', hazard: '5_위험요인개선', checklist: '6_법령준수점검표', drill: '7_비상훈련', eval_boss: '8_소장평가', eval_staff: '8_관리자평가', budget: '9_예산관리', forms: '10_서식게시판', seal: '직인' };
+        function backupOpen() {
+            const y = new Date().getFullYear();
+            document.body.insertAdjacentHTML('beforeend', `<div id="backupModal" style="position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:9000; display:flex; align-items:center; justify-content:center; padding:16px;">
+                <div style="background:#fff; width:100%; max-width:440px; border-radius:14px; padding:22px; border-top:6px solid var(--blue-600);">
+                    <div style="font-size:16px; font-weight:900; margin-bottom:6px;">💾 자료 백업 내려받기</div>
+                    <p style="font-size:12.5px; color:var(--slate-600); line-height:1.55; margin-bottom:12px;">기록 전체와 사진·서식 파일을 ZIP 파일 한 개로 내려받습니다. 반기마다 한 번씩 받아 회사 PC에 보관해 두시기를 권합니다. 사진이 많으면 몇 분 걸릴 수 있습니다.</p>
+                    <div class="form-label">백업 범위</div>
+                    <select id="backupYear" class="form-select" style="margin-bottom:12px;">
+                        <option value="${y}">${y}년 기록</option><option value="${y - 1}">${y - 1}년 기록</option><option value="">전체 기간</option>
+                    </select>
+                    <div id="backupMsg" style="min-height:18px; font-size:12.5px; font-weight:700; color:var(--blue-700); margin-bottom:10px;"></div>
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <button class="btn btn-outline" id="backupCloseBtn" onclick="backupClose()">닫기</button>
+                        <button class="btn btn-blue" id="backupBtn" onclick="backupRun()">내려받기</button>
+                    </div>
+                </div></div>`);
+        }
+        function backupClose() { const m = document.getElementById('backupModal'); if (m) m.remove(); }
+        function backupLoadZipLib() {
+            if (window.JSZip) return Promise.resolve();
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+                s.onload = () => resolve(); s.onerror = () => reject(new Error('압축 도구를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'));
+                document.head.appendChild(s);
+            });
+        }
+        // 기록 안에 들어 있는 파일 경로를 모두 찾음 (사진: {path, caption}, 서식: {path, name})
+        function backupFindFiles(v, out) {
+            if (Array.isArray(v)) v.forEach(x => backupFindFiles(x, out));
+            else if (v && typeof v === 'object') {
+                if (typeof v.path === 'string' && v.path.indexOf(currentCompanyId + '/') === 0) out.push({ path: v.path, name: v.name || '' });
+                Object.keys(v).forEach(k => backupFindFiles(v[k], out));
+            }
+            return out;
+        }
+        function backupSafe(s) { return String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim() || '이름없음'; }
+        async function backupRun() {
+            const msg = (t) => { const e = document.getElementById('backupMsg'); if (e) e.innerText = t; };
+            const btn = document.getElementById('backupBtn'), closeBtn = document.getElementById('backupCloseBtn');
+            const year = document.getElementById('backupYear').value;
+            btn.disabled = true; closeBtn.disabled = true;
+            try {
+                msg('압축 도구를 준비하는 중…'); await backupLoadZipLib();
+                msg('기록을 불러오는 중…');
+                let rows = [];
+                for (let from = 0; ; from += 500) {
+                    const res = await sb.from('records').select('site_id, module, record_date, item_key, data, updated_at').eq('company_id', currentCompanyId).order('updated_at').range(from, from + 499);
+                    if (res.error) throw res.error;
+                    rows = rows.concat(res.data || []);
+                    if (!res.data || res.data.length < 500) break;
+                }
+                // 연도를 고르면 그 해 일자의 기록 + 일자 없이 쌓이는 기록(의견청취·개선사례·서식·직인)을 담음
+                if (year) rows = rows.filter(r => !r.record_date || r.record_date.slice(0, 4) === year);
+                const siteName = (id) => id ? backupSafe((sitesData.find(s => s.id === id) || {}).name || id) : '본사';
+                const zip = new JSZip();
+                zip.file('기록_전체.json', JSON.stringify({ company: hqOrg.companyName, exportedAt: new Date().toISOString(), range: year || 'all', sites: sitesData.map(s => ({ id: s.id, name: s.name })), records: rows }, null, 1));
+                const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+                const csv = ['모듈,현장,기록 일자,건 번호,본사 확인,마지막 저장'].concat(rows.filter(r => !/_ok$/.test(r.module)).map(r => {
+                    const ok = rows.some(o => o.module === r.module + '_ok' && o.site_id === r.site_id && o.record_date === r.record_date && (o.item_key || '') === (r.item_key || ''));
+                    return [q(BACKUP_MODULE_NAMES[r.module] || r.module), q(siteName(r.site_id)), q(r.record_date || ''), q(r.item_key || ''), q(ok ? '확인 완료' : ''), q((r.updated_at || '').slice(0, 16).replace('T', ' '))].join(',');
+                }));
+                zip.file('기록_목록.csv', '﻿' + csv.join('\r\n'));
+                const files = [], seen = {}, failed = [];
+                rows.forEach(r => backupFindFiles(r.data, []).forEach(f => { if (!seen[f.path]) { seen[f.path] = 1; files.push({ path: f.path, name: f.name, row: r }); } }));
+                let done = 0;
+                for (const f of files) {
+                    msg('파일을 받는 중… ' + (++done) + ' / ' + files.length);
+                    const isForm = f.row.module === 'forms';
+                    try {
+                        const res = await sb.storage.from(isForm ? 'forms' : 'evidence').download(f.path);
+                        if (res.error || !res.data) throw (res.error || new Error('빈 파일'));
+                        const base = f.path.split('/').pop();
+                        const name = isForm ? ('서식/' + base.split('.')[0].slice(0, 6) + '_' + backupSafe(f.name || base))
+                            : ('사진/' + (BACKUP_MODULE_NAMES[f.row.module] || f.row.module) + '/' + siteName(f.row.site_id) + '/' + base);
+                        zip.file(name, res.data);
+                    } catch (e) { failed.push(f.path + '  (' + ((e && e.message) || e) + ')'); }
+                }
+                if (failed.length) zip.file('받지_못한_파일.txt', failed.join('\r\n'));
+                msg('압축하는 중…');
+                const blob = await zip.generateAsync({ type: 'blob' });
+                const a = document.createElement('a'), t = todayStr().replace(/-/g, '');
+                a.href = URL.createObjectURL(blob); a.download = '안전보건자료_백업_' + backupSafe(hqOrg.companyName) + '_' + (year || '전체') + '_' + t + '.zip';
+                document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+                msg('✓ 내려받았습니다. 기록 ' + rows.filter(r => !/_ok$/.test(r.module)).length + '건, 파일 ' + (files.length - failed.length) + '개' + (failed.length ? ' (받지 못한 파일 ' + failed.length + '개는 목록에 적었습니다)' : ''));
+            } catch (e) { msg('⚠ 백업하지 못했습니다: ' + ((e && e.message) || e)); }
+            btn.disabled = false; closeBtn.disabled = false;
         }
         // ====== [여기에 모듈 1 붙여넣기] ======
 // 안전보건 경영방침·목표 (서버 저장판) — 회사 공통·연도별.  본사가 작성하고 현장 계정은 열람·인쇄만
@@ -1323,6 +1597,7 @@ function tbmSaveBarInner(key) {
         <button id="tbmSaveBtn" class="btn ${dirty ? 'btn-emerald' : 'btn-outline'}" style="padding:10px 22px; font-size:14px;" onclick="tbmSaveNow()">💾 일지 저장</button>`;
 }
 function tbmRefreshSaveBar() {
+    if (uiLater('tbmBar', tbmRefreshSaveBar)) return;
     const bar = document.getElementById('tbmSaveBar');
     if (bar && sitesData.length) bar.innerHTML = tbmSaveBarInner(getCurTbmSiteId() + '|' + tbmSelectedDate);
 }
@@ -1998,6 +2273,7 @@ function mod6SaveBarInner(key) {
         <button id="mod6SaveBtn" class="btn ${dirty ? 'btn-emerald' : 'btn-outline'}" style="padding:10px 22px; font-size:14px;" onclick="mod6SaveNow()">💾 점검표 저장</button>`;
 }
 function mod6RefreshSaveBar() {
+    if (uiLater('mod6Bar', mod6RefreshSaveBar)) return;
     const bar = document.getElementById('mod6SaveBar');
     if (bar && sitesData.length) bar.innerHTML = mod6SaveBarInner(mod6Key(getCurMod6SiteId(), mod6Half));
 }
@@ -2178,8 +2454,8 @@ function renderModule6() {
                 </div>
             </div>
             ${approvalHtml}
-            <div class="law-table-wrap">
-                <table class="law-table">
+            <div class="law-table-wrap law-cards-wrap">
+                <table class="law-table law-cards">
                     <thead><tr><th style="width:45px;">No</th><th style="width:85px;">분야</th><th>법령 의무이행 점검 항목 (산업안전보건법·중대재해처벌법)</th><th style="width:110px;">점검결과</th><th style="width:150px;">보완완료</th><th style="width:220px;">현황 및 비고 (직접 수정)</th></tr></thead>
                     <tbody>
                         ${rec.items.map((r, idx) => `
@@ -2187,13 +2463,13 @@ function renderModule6() {
                                 <td style="text-align:center; font-weight:800;">${r.no}</td>
                                 <td style="text-align:center;"><span style="background:var(--slate-100); padding:2px 6px; border-radius:4px; font-weight:800; font-size:11px;">${mod6Esc(MOD6_TEMPLATE[idx].cat)}</span></td>
                                 <td><b>${mod6Esc(MOD6_TEMPLATE[idx].item)}</b></td>
-                                <td style="text-align:center;">
+                                <td style="text-align:center;" data-label="점검결과">
                                     <select class="form-select" style="font-weight:800; color:${mod6ResultColor(r)};" ${dis} onchange="mod6SetResult(${idx}, this.value)">
                                         <option value="" ${r.result ? '' : 'selected'}>(선택)</option>
                                         ${MOD6_RESULTS.map(v => `<option value="${v}" ${r.result === v ? 'selected' : ''}>${v}</option>`).join('')}
                                     </select>
                                 </td>
-                                <td style="text-align:center;">
+                                <td style="text-align:center;" data-label="보완완료" class="${r.result !== '보완필요' ? 'lc-skip' : ''}">
                                     ${r.result !== '보완필요' ? '<span style="color:var(--slate-400);">-</span>' : `
                                         <label style="display:inline-flex; align-items:center; gap:5px; font-weight:800; font-size:12px; color:${r.done ? '#1d4ed8' : '#dc2626'}; cursor:pointer;">
                                             <input type="checkbox" ${r.done ? 'checked' : ''} ${dis} onchange="mod6SetDone(${idx}, this.checked)"> ${r.done ? '완료' : '미완료'}
@@ -2201,7 +2477,7 @@ function renderModule6() {
                                         ${r.done ? `<input type="date" class="form-input" style="margin-top:4px; padding:4px 6px; font-size:11.5px;" value="${mod6Esc(r.doneDate)}" ${dis} onchange="mod6SetDoneDate(${idx}, this.value)">` : ''}
                                     `}
                                 </td>
-                                <td><input type="text" class="form-input" value="${mod6Esc(r.note)}" ${dis} onchange="mod6SetNote(${idx}, this.value)"></td>
+                                <td data-label="현황 및 비고"><input type="text" class="form-input" value="${mod6Esc(r.note)}" ${dis} onchange="mod6SetNote(${idx}, this.value)"></td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -2365,6 +2641,9 @@ makeRecordModule({
         ${p.approvalRow}`
 });
 
+// 조직도에 안전관리자가 없는 현장은 ② 안전관리자 평가를 보이지 않음 (이미 점수를 넣은 기록은 그대로 보여 줌)
+function mod8HasSafety(siteObj, r) { return !!(siteObj && siteObj.safetyMgr) || (r.safetyScores || []).some(s => s > 0); }
+
 // ②③ 현장소장의 안전관리자·관리감독자 평가
 makeRecordModule({
     id: 8, name: 'evs', module: 'eval_staff', mode: 'half', approval: true, photoKeys: [],
@@ -2374,19 +2653,19 @@ makeRecordModule({
     printTitle: '🖨️ ② 안전관리자 · ③ 관리감독자 반기 평가표',
     blank: (siteId) => ({ date: todayStr(), evaluator: ((sitesData.find(s => s.id === siteId) || {}).boss) || '', safetyScores: [0, 0, 0, 0, 0], superScores: [0, 0, 0, 0, 0], comment: '' }),
     normalize: (d) => ({ date: d.date || '', evaluator: d.evaluator || '', safetyScores: mod8NormScores(d.safetyScores), superScores: mod8NormScores(d.superScores), comment: d.comment || '' }),
-    confirmWarn: (r) => { const n = mod8Blank(r.safetyScores) + mod8Blank(r.superScores); return n ? ['미평가 항목 ' + n + '개가 남아 있습니다'] : []; },
+    confirmWarn: (r, siteObj) => { const n = (mod8HasSafety(siteObj, r) ? mod8Blank(r.safetyScores) : 0) + mod8Blank(r.superScores); return n ? ['미평가 항목 ' + n + '개가 남아 있습니다'] : []; },
     formHtml: (r, c) => `
         <div class="section-box" style="border-left:4px solid var(--emerald-600);">
             <div class="grid-3">
                 ${rmInput(c.name, r, 'evaluator', '평가자 (현장소장)', c.dis, 'text', '예: 홍길동 소장')}
                 ${rmInput(c.name, r, 'date', '평가 일자', c.dis, 'date')}
-                <div><div class="form-label">평가 요약</div><input type="text" class="form-input" value="안전관리자 ${mod8Total(r.safetyScores)}점 / 관리감독자 ${mod8Total(r.superScores)}점" readonly style="font-weight:800; color:var(--blue-700);"></div>
+                <div><div class="form-label">평가 요약</div><input type="text" class="form-input" value="${mod8HasSafety(c.siteObj, r) ? '안전관리자 ' + mod8Total(r.safetyScores) + '점 / ' : ''}관리감독자 ${mod8Total(r.superScores)}점" readonly style="font-weight:800; color:var(--blue-700);"></div>
             </div>
         </div>
-        <div class="section-box" style="border-left:4px solid var(--blue-600);">
+        ${mod8HasSafety(c.siteObj, r) ? `<div class="section-box" style="border-left:4px solid var(--blue-600);">
             <div class="section-title"><span>② 안전관리자 직무수행 평가 (대상: ${esc(c.siteObj.safetyMgr) || '미등록'})</span><span style="color:var(--blue-700);">총점: ${mod8Total(r.safetyScores)}점</span></div>
             ${mod8ScoreTable(c.name, 'safetyScores', mod8SafetyQuestions, r.safetyScores, c.dis, '소장')}
-        </div>
+        </div>` : `<div style="background:var(--slate-50); border:1px dashed var(--slate-300); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:12.5px; color:var(--slate-600);">이 현장은 2번 조직도에 안전관리자가 등록되어 있지 않아 ② 안전관리자 평가는 생략합니다. 안전관리자가 있으면 본사에서 조직도에 등록해 주세요.</div>`}
         <div class="section-box" style="border-left:4px solid var(--amber-500);">
             <div class="section-title"><span>③ 관리감독자(공무·공사·반장) 직무수행 평가 (대상: ${esc([c.siteObj.civilMgr, c.siteObj.foremen].filter(Boolean).join(' / ')) || '미등록'})</span><span style="color:var(--amber-600);">총점: ${mod8Total(r.superScores)}점</span></div>
             ${mod8ScoreTable(c.name, 'superScores', mod8SuperQuestions, r.superScores, c.dis, '소장')}
@@ -2398,11 +2677,11 @@ makeRecordModule({
         </div>
         <table class="a4-table">
             <tr><th style="width:18%;">대상 현장</th><td style="width:32%;"><b>${esc(p.siteObj.name)}</b></td><th style="width:18%;">평가자(현장소장)</th><td style="width:32%;"><b>${esc(r.evaluator)}</b></td></tr>
-            <tr><th>평가 반기 / 일자</th><td>${p.halfLabel}<br>${esc(r.date)}</td><th>평가 요약</th><td>안전관리자 <b>${mod8Total(r.safetyScores)}점</b> / 관리감독자 <b>${mod8Total(r.superScores)}점</b></td></tr>
-            <tr><th>② 안전관리자</th><td>${esc(p.siteObj.safetyMgr)}</td><th>③ 관리감독자</th><td>${esc([p.siteObj.civilMgr, p.siteObj.foremen].filter(Boolean).join(' / '))}</td></tr>
+            <tr><th>평가 반기 / 일자</th><td>${p.halfLabel}<br>${esc(r.date)}</td><th>평가 요약</th><td>${mod8HasSafety(p.siteObj, r) ? '안전관리자 <b>' + mod8Total(r.safetyScores) + '점</b> / ' : ''}관리감독자 <b>${mod8Total(r.superScores)}점</b></td></tr>
+            <tr><th>② 안전관리자</th><td>${mod8HasSafety(p.siteObj, r) ? esc(p.siteObj.safetyMgr) : '해당 없음 (미선임)'}</td><th>③ 관리감독자</th><td>${esc([p.siteObj.civilMgr, p.siteObj.foremen].filter(Boolean).join(' / '))}</td></tr>
         </table>
-        <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[② 안전관리자 직무수행 평가 (총 ${mod8Total(r.safetyScores)}점)]</div>
-        ${mod8PrintTable(mod8SafetyQuestions, r.safetyScores)}
+        ${mod8HasSafety(p.siteObj, r) ? `<div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[② 안전관리자 직무수행 평가 (총 ${mod8Total(r.safetyScores)}점)]</div>
+        ${mod8PrintTable(mod8SafetyQuestions, r.safetyScores)}` : ''}
         <div style="font-weight:800; font-size:12px; margin:8px 0 4px;">[③ 관리감독자(공무·공사·반장) 직무수행 평가 (총 ${mod8Total(r.superScores)}점)]</div>
         ${mod8PrintTable(mod8SuperQuestions, r.superScores)}
         <table class="a4-table"><tr><th style="width:18%;">소장 종합의견</th><td>${esc(r.comment)}</td></tr></table>
@@ -2733,6 +3012,7 @@ function renderModule10() { return rmRender('forms'); }
             ctrl.innerHTML = `
                 <span id="saveStatusPill" style="font-size:11.5px; font-weight:800; padding:5px 10px; border-radius:6px; border:1px solid #475569; color:#94a3b8;">서버 연결됨</span>
                 <span style="font-size:12px; font-weight:700; color:#e2e8f0;">${ROLE_LABELS[appUser.role] || ''} · ${appUser.displayName}</span>
+                <button class="btn btn-outline btn-sm" style="background:#1e293b; color:#e2e8f0; border-color:#475569;" onclick="pwOpen()">🔑 비밀번호</button>
                 <button class="btn btn-outline btn-sm" style="background:#1e293b; color:#34d399; border-color:#059669;" onclick="doLogout()">로그아웃</button>
             `;
         }
