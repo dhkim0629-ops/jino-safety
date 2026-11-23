@@ -184,7 +184,7 @@
         const SUPABASE_URL = 'https://vsbddasoslqmcvoppvuj.supabase.co';
         const SUPABASE_KEY = 'sb_publishable__6dfg59E_kmUEO9nkLNA_Q_gxt1jidT';
         const sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
-        const SERVER_MODULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];   // 서버에 연결된 모듈 번호 (전 모듈 연결됨)
+        const SERVER_MODULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];   // 서버에 연결된 모듈 번호 (전 모듈 연결됨)
 
         let activeModule = 0;
         let currentSiteId = 'hq';
@@ -203,7 +203,8 @@
             { id: 8, title: '8. 책임자등 반기평가', tag: '🔒 보안락 적용' },
             { id: 9, title: '9. 안전보건 예산관리', tag: '집행내역·인쇄' },
             { id: 10, title: '10. 서식 게시판', tag: '서식·매뉴얼' },
-            { id: 11, title: '11. 본사 공지·전파', tag: '확인·사진회신' }
+            { id: 11, title: '11. 본사 공지·전파', tag: '확인·사진회신' },
+            { id: 12, title: '12. 순회점검 일지', tag: '일지 파일·본사확인' }
         ];
 
         let hqOrg = { companyName: '', ceoName: '', ceoDuty: '', safetyManager: '', advisorFirm: '' };
@@ -1025,16 +1026,17 @@
             const hDate = halfDate(halfCurrent()), yDate = y + '-01-01';
             try {
                 const base = () => sb.from('records').select('site_id, module, record_date, item_key').eq('company_id', currentCompanyId);
-                const [tbm, per, haz, ntcN, ntcA] = await Promise.all([
+                const [tbm, per, haz, ntcN, ntcA, pat] = await Promise.all([
                     base().eq('module', 'tbm').gte('record_date', y + '-' + mm + '-01').lte('record_date', y + '-' + mm + '-' + String(lastDay).padStart(2, '0')),
                     base().in('module', ['checklist', 'checklist_ok', 'drill', 'drill_ok', 'eval_staff', 'eval_staff_ok', 'eval_boss', 'eval_boss_ok', 'policy', 'budget', 'budget_ok']).in('record_date', [hDate, yDate]),
                     base().in('module', ['hazard', 'hazard_ok']).is('record_date', null),
                     sb.from('records').select('item_key, data').eq('company_id', currentCompanyId).eq('module', 'notice').is('site_id', null),
-                    sb.from('records').select('site_id, item_key, data').eq('company_id', currentCompanyId).eq('module', 'notice_ack')
+                    sb.from('records').select('site_id, item_key, data').eq('company_id', currentCompanyId).eq('module', 'notice_ack'),
+                    sb.from('records').select('site_id, module, item_key, data').eq('company_id', currentCompanyId).in('module', ['patrol', 'patrol_ok'])
                 ]);
                 if (seq !== dashSeq) return;
-                const err = tbm.error || per.error || haz.error || ntcN.error || ntcA.error; if (err) throw err;
-                dashData = { tbm: tbm.data || [], per: per.data || [], haz: haz.data || [], ntcN: ntcN.data || [], ntcA: ntcA.data || [], hDate: hDate, yDate: yDate, month: now.getMonth() + 1 };
+                const err = tbm.error || per.error || haz.error || ntcN.error || ntcA.error || pat.error; if (err) throw err;
+                dashData = { tbm: tbm.data || [], per: per.data || [], haz: haz.data || [], ntcN: ntcN.data || [], ntcA: ntcA.data || [], pat: pat.data || [], hDate: hDate, yDate: yDate, month: now.getMonth() + 1 };
             } catch (e) { console.warn('현황 불러오기 실패:', e); dashData = { error: true }; }
             dashPaint();
         }
@@ -1078,6 +1080,12 @@
                 const hz = d.haz.filter(r => r.site_id === s.id && r.module === 'hazard');
                 const hzOk = new Set(d.haz.filter(r => r.site_id === s.id && r.module === 'hazard_ok').map(r => r.item_key));
                 const hzWait = hz.filter(r => !hzOk.has(r.item_key)).length;
+                // 순회점검: 이번 달 점검 일자 기준 건수와 본사 확인 대기 건수 (미실시 표시는 하지 않음)
+                const ptAll = d.pat.filter(r => r.site_id === s.id && r.module === 'patrol');
+                const ptOk = new Set(d.pat.filter(r => r.site_id === s.id && r.module === 'patrol_ok').map(r => r.item_key));
+                const ptMonth = ptAll.filter(r => ((r.data && r.data.date) || '').slice(0, 7) === today.slice(0, 7)).length;
+                const ptWait = ptAll.filter(r => !ptOk.has(r.item_key)).length;
+                waitTotal += ptWait;
                 waitTotal += hzWait + ['checklist', 'drill', 'eval_staff'].filter(m => dashState(d.per, m, s.id, d.hDate, true)[1] === 'wait').length;
                 return `<div style="border:1px solid var(--slate-300); border-radius:10px; padding:12px; background:#fff;">
                     <div style="font-weight:900; font-size:14px; margin-bottom:6px;">🏗️ ${esc(s.name)} <span style="font-weight:700; font-size:12px; color:var(--slate-500);">${esc(s.boss)}</span></div>
@@ -1088,6 +1096,7 @@
                     ${row('8. 관리자 평가', st('eval_staff', s.id, d.hDate, true, 8))}
                     ${isSiteBoss() ? '' : row('8. 현장소장 평가', st('eval_boss', s.id, d.hDate, true, 8))}
                     ${row('11. 본사 공지', dashNotice(d, s.id))}
+                    ${row('12. 순회점검 (' + d.month + '월)', dashBadge(ptMonth + '건 등록', 'info', 12, s.id) + (ptWait ? dashBadge('확인 대기 ' + ptWait + '건', 'wait', 12, s.id) : ''))}
                 </div>`;
             }).join('');
             const company = `<div style="border:1px solid var(--slate-300); border-radius:10px; padding:12px; background:var(--slate-50);">
@@ -1142,7 +1151,7 @@
 
         // ====== [자료 백업] ======
         // 본사·지노 계정이 기록(JSON·목록 CSV)과 사진·서식 파일을 ZIP 한 개로 내려받음
-        const BACKUP_MODULE_NAMES = { policy: '1_경영방침', tbm: '3_TBM일지', feedback: '4_의견청취', hazard: '5_위험요인개선', checklist: '6_법령준수점검표', drill: '7_비상훈련', eval_boss: '8_소장평가', eval_staff: '8_관리자평가', budget: '9_예산관리', forms: '10_서식게시판', notice: '11_본사공지', notice_ack: '11_공지회신', seal: '직인' };
+        const BACKUP_MODULE_NAMES = { policy: '1_경영방침', tbm: '3_TBM일지', feedback: '4_의견청취', hazard: '5_위험요인개선', checklist: '6_법령준수점검표', drill: '7_비상훈련', eval_boss: '8_소장평가', eval_staff: '8_관리자평가', budget: '9_예산관리', forms: '10_서식게시판', notice: '11_본사공지', notice_ack: '11_공지회신', patrol: '12_순회점검', seal: '직인' };
         function backupOpen() {
             const y = new Date().getFullYear();
             document.body.insertAdjacentHTML('beforeend', `<div id="backupModal" style="position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:9000; display:flex; align-items:center; justify-content:center; padding:16px;">
@@ -1211,12 +1220,12 @@
                 let done = 0;
                 for (const f of files) {
                     msg('파일을 받는 중… ' + (++done) + ' / ' + files.length);
-                    const isForm = f.row.module === 'forms' || f.row.module === 'notice';   // 서식·공지 첨부는 서식 보관함에 있음
+                    const isForm = !!f.name;   // 이름이 붙은 것은 문서 파일(서식·공지 첨부·순회점검 문서) → 서식 보관함, 나머지는 사진 → 사진 보관함
                     try {
                         const res = await sb.storage.from(isForm ? 'forms' : 'evidence').download(f.path);
                         if (res.error || !res.data) throw (res.error || new Error('빈 파일'));
                         const base = f.path.split('/').pop();
-                        const name = isForm ? ((f.row.module === 'notice' ? '공지첨부/' : '서식/') + base.split('.')[0].slice(0, 6) + '_' + backupSafe(f.name || base))
+                        const name = isForm ? ((f.row.module === 'notice' ? '공지첨부/' : f.row.module === 'forms' ? '서식/' : '첨부문서/' + (BACKUP_MODULE_NAMES[f.row.module] || f.row.module) + '/' + siteName(f.row.site_id) + '/') + base.split('.')[0].slice(0, 6) + '_' + backupSafe(f.name || base))
                             : ('사진/' + (BACKUP_MODULE_NAMES[f.row.module] || f.row.module) + '/' + siteName(f.row.site_id) + '/' + base);
                         zip.file(name, res.data);
                     } catch (e) { failed.push(f.path + '  (' + ((e && e.message) || e) + ')'); }
@@ -3338,6 +3347,131 @@ function renderModule11() {
     if (ntc.sel && (!ntc.notices[ntc.sel] || ntcVisibleIds().indexOf(ntc.sel) < 0)) ntc.sel = null;
     return ntc.sel ? ntcDetailHtml(ntc.sel) : ntcListHtml();
 }
+        // ====== [여기에 모듈 12 붙여넣기] ======
+// 순회점검 일지 (서버 저장판) — 현장 담당자가 작성한 순회점검 일지를 파일로 올리고, 건별로 본사 최종 확인
+// 서버 기록 한 건 = 순회점검 일지 한 건.  data = { date, inspector, note, photos:[{ path, caption }], files:[{ path, name, size }] }
+// 사진(휴대폰으로 찍은 종이 일지 등)은 '사진 보관함'(evidence), PDF·한글 등 문서 파일은 '서식 보관함'(forms)의 [회사]/[현장]/patrol/ 아래에 저장
+const PAT_DOC_EXT = FORMS_EXT.filter(e => ['jpg', 'jpeg', 'png'].indexOf(e) < 0);
+function patIsImage(file) { return /^image\//.test(file.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name); }
+// 고른 파일을 사진과 문서로 나누어 각각 올림
+function patAddFiles(files) {
+    if (!files.length) return;
+    const imgs = files.filter(patIsImage), docs = files.filter(f => !patIsImage(f));
+    if (imgs.length) rmUploadFiles('pat', 'photos', imgs);
+    if (docs.length) patUploadDocs(docs);
+}
+function patPick(event) { const files = Array.from(event.target.files || []); event.target.value = ''; patAddFiles(files); }
+function patDrop(event, el) {
+    if (!dzIsFileDrag(event)) return;
+    event.preventDefault(); el.style.outline = ''; el.style.outlineOffset = '';
+    patAddFiles(Array.from(event.dataTransfer.files || []));
+}
+async function patUploadDocs(files) {
+    const c = rmCur('pat');
+    if (!files.length || c.fixed) return;
+    const bad = files.filter(f => PAT_DOC_EXT.indexOf((f.name.split('.').pop() || '').toLowerCase()) < 0);
+    if (bad.length) return alert('올릴 수 없는 파일 형식입니다: ' + bad.map(f => f.name).join(', ') + '\n\n올릴 수 있는 형식: 사진(JPG, PNG), ' + PAT_DOC_EXT.join(', '));
+    const big = files.filter(f => f.size > FORMS_MAX_BYTES);
+    if (big.length) return alert('파일 1개는 20MB 이하만 올릴 수 있습니다: ' + big.map(f => f.name).join(', '));
+    const M = c.M, siteId = c.siteId, key = c.key;
+    M.uploading += files.length; renderActiveModule();
+    for (const file of files) {
+        try {
+            const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+            const path = [currentCompanyId, siteId, 'patrol', srvRandomId() + '.' + ext].join('/');
+            setSaveStatus('saving', '… 파일 올리는 중');
+            const res = await sb.storage.from('forms').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+            const e = rmEntryAt(M, siteId, key);
+            if (res.error) srvFail('파일 올리기', res.error);
+            else if (e) { e.rec.files.push({ path: path, name: file.name, size: file.size }); await rmSave('pat', siteId, key); }
+            else await sb.storage.from('forms').remove([path]);   // 그 사이 기록이 삭제된 경우 올린 파일 정리
+        } catch (err) { srvFail('파일 올리기', err); }
+        M.uploading -= 1;
+        if (activeModule === M.id) renderActiveModule();
+    }
+}
+async function patDownload(idx) {
+    const c = rmCur('pat'), f = c.entry && c.entry.rec.files[idx]; if (!f) return;
+    const res = await sb.storage.from('forms').createSignedUrl(f.path, 120, { download: f.name });
+    if (res.error || !res.data || !res.data.signedUrl) return alert('파일을 내려받지 못했습니다.\n' + ((res.error && res.error.message) || '') + '\n\n잠시 뒤 다시 시도해 주세요.');
+    const a = document.createElement('a');
+    a.href = res.data.signedUrl; a.download = f.name; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+}
+function patRemoveFile(idx) {
+    const c = rmCur('pat');
+    if (c.fixed || !c.entry.rec.files[idx]) return;
+    if (!confirm('"' + c.entry.rec.files[idx].name + '" 파일을 삭제하시겠습니까?')) return;
+    const path = c.entry.rec.files[idx].path;
+    c.entry.rec.files.splice(idx, 1);
+    rmSave('pat', c.siteId, c.key).then(() => sb.storage.from('forms').remove([path]));
+    renderActiveModule();
+}
+
+makeRecordModule({
+    id: 12, name: 'pat', module: 'patrol', mode: 'list', approval: true, photoKeys: ['photos'],
+    title: '🚶 12. 순회점검 일지 (일지 파일 등록)',
+    itemLabel: '순회점검 일지', newLabel: '+ 새 순회점검 일지 등록', saveLabel: '순회점검 일지 저장',
+    listTitle: '점검자 · 비고', listStatusTitle: '일지 파일',
+    printTitle: '🖨️ 12. 순회점검 일지 등록 확인서 (공식 A4)',
+    blank: () => ({ date: todayStr(), inspector: '', note: '', photos: [], files: [] }),
+    normalize: (d) => ({ date: d.date || '', inspector: d.inspector || '', note: d.note || '', photos: normPhotos(d.photos), files: formsNormFiles(d.files) }),
+    listCols: (r) => {
+        const n = r.photos.length + r.files.length;
+        return { date: r.date, text: r.inspector || '(점검자 미입력)', sub: r.note.split('\n')[0].slice(0, 60), status: n ? '첨부 ' + n + '개' : '파일 없음', statusColor: n ? 'var(--emerald-700)' : 'var(--red-700)' };
+    },
+    listCount: (r) => '📎 ' + (r.photos.length + r.files.length),
+    afterDelete: (rec) => { const paths = rec.files.map(f => f.path); if (paths.length) sb.storage.from('forms').remove(paths); },
+    confirmWarn: (r) => {
+        const w = [];
+        if (!r.photos.length && !r.files.length) w.push('올린 일지 파일이 없습니다');
+        if (!r.inspector.trim()) w.push('점검자가 비어 있습니다');
+        return w;
+    },
+    formHtml: (r, c) => `
+        <div class="section-box" style="border-left:4px solid var(--emerald-600);">
+            <div class="grid-2" style="margin-bottom:10px;">
+                ${rmInput(c.name, r, 'date', '점검 일자', c.dis, 'date')}
+                ${rmInput(c.name, r, 'inspector', '점검자', c.dis, 'text', '예: 홍길동 (관리감독자)')}
+            </div>
+            <div class="form-label">비고</div>
+            ${rmTextarea(c.name, r, 'note', '예: 지적사항 2건, 즉시 조치 완료 / 특이사항 없음', c.dis)}
+        </div>
+        <div class="section-box" style="border-left:4px solid var(--blue-600);" ${c.locked ? '' : 'ondragover="rmDragOver(event, this)" ondragleave="rmDragLeave(event, this)" ondrop="patDrop(event, this)"'}>
+            <div class="section-title" style="flex-wrap:wrap; gap:6px;">
+                <span>📎 순회점검 일지 파일 (사진 ${r.photos.length}장 · 문서 ${r.files.length}개)</span>
+                ${c.locked ? '' : `<span style="display:flex; gap:6px; flex-wrap:wrap;">
+                    ${rmUploadBtn(c.name, 'photos', '📷 + 일지 사진 올리기', 'btn-blue', false)}
+                    <label class="btn btn-outline btn-sm" style="cursor:pointer;">📄 + 문서 파일 올리기<input type="file" multiple class="hidden" accept="${PAT_DOC_EXT.map(e => '.' + e).join(',')}" onchange="patPick(event)"></label>
+                </span>`}
+            </div>
+            ${c.uploading > 0 ? `<div style="font-size:12px; font-weight:800; color:var(--blue-700); margin-bottom:6px;">⏳ 파일 ${c.uploading}개 올리는 중…</div>` : ''}
+            ${r.photos.length || r.files.length || c.uploading > 0 ? '' : `<div style="font-size:12px; color:var(--slate-500);">${c.locked ? '올린 일지 파일이 없습니다.' : (isTouchDevice() ? '종이 일지는 [사진 촬영]으로 바로 찍어 올리고, PDF·한글 파일은 [문서 파일 올리기]로 올립니다.' : '작성한 순회점검 일지를 올려 주세요. 사진(JPG, PNG)과 PDF·한글·엑셀 파일을 이 칸으로 끌어다 놓아도 됩니다 (문서 1개 20MB 이하).')}</div>`}
+            <div style="display:flex; flex-direction:column; gap:6px;">
+                ${r.files.map((f, idx) => `
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff; border:1px solid var(--slate-200); border-radius:8px; padding:8px 10px;">
+                        <span style="flex:1; min-width:160px; font-weight:800; font-size:13px; word-break:break-all;">📄 ${esc(f.name)} <span style="font-weight:600; font-size:11px; color:var(--slate-500);">(${formsSizeLabel(f.size)})</span></span>
+                        <button class="btn btn-emerald btn-sm" onclick="patDownload(${idx})">⬇ 내려받기</button>
+                        ${c.locked ? '' : `<button class="btn btn-red btn-sm" onclick="patRemoveFile(${idx})">삭제</button>`}
+                    </div>`).join('')}
+            </div>
+            ${r.photos.length ? rmPhotoGrid(c.name, 'photos', r.photos, c.locked) : ''}
+        </div>`,
+    printHtml: (r, p) => `
+        <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:10px; margin-bottom:14px;">
+            <h1 style="font-size:20px; font-weight:900;">현장 순회점검 일지 등록 확인서</h1>
+        </div>
+        <table class="a4-table">
+            <tr><th style="width:18%;">현장 명칭</th><td style="width:32%; font-weight:800;">${p.siteLabel}</td><th style="width:18%;">점검 일자</th><td style="width:32%;">${esc(r.date)}</td></tr>
+            <tr><th>점검자</th><td colspan="3">${esc(r.inspector)}</td></tr>
+            <tr><th>비고</th><td colspan="3" style="white-space:pre-line;">${esc(r.note)}</td></tr>
+            <tr><th>첨부 문서</th><td colspan="3">${r.files.length ? r.files.map(f => esc(f.name)).join(', ') + '<div style="font-size:10px; color:#64748b; margin-top:2px;">※ 문서 파일은 프로그램에서 내려받아 함께 편철합니다.</div>' : '없음'}</td></tr>
+        </table>
+        ${p.approvalRow}
+        ${r.photos.length ? `<div style="font-weight:800; font-size:12px; margin:10px 0 6px;">📸 순회점검 일지 (사진 ${r.photos.length}장)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">${rmPrintPhotos(r.photos)}</div>` : ''}`
+});
+function renderModule12() { return rmRender('pat'); }
    // ====== [로그인 · 권한 — 서버 연결판] ======
         const ROLE_LABELS = {
             jino_admin: '👑 지노 관리자',
